@@ -1,4 +1,4 @@
-run_id=42875265059
+run_id=42878727228
 sdk=success tests=success build=success
 --- xcode / sdk inventory ---
 == runner ==
@@ -105,8 +105,8 @@ PASS: tree copy preserves symlink item without following it
 PASS: copied symlink remains a symlink
 
 == WQAppsCopyTests ==
-2026-11-10 18:27:11.438 WQAppsCopyTests[1600:7362] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-CD941CA2-89C3-493B-8F90-4A970EFDF5E7/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-CD941CA2-89C3-493B-8F90-4A970EFDF5E7/dst (3 items) OK
-2026-11-10 18:27:11.440 WQAppsCopyTests[1600:7362] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-CD941CA2-89C3-493B-8F90-4A970EFDF5E7/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-CD941CA2-89C3-493B-8F90-4A970EFDF5E7/empty-dst (0 items) OK
+2026-11-10 18:47:42.185 WQAppsCopyTests[1382:6719] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-7EE6BCEC-567F-4E8D-AF21-D0E3AB74B00F/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-7EE6BCEC-567F-4E8D-AF21-D0E3AB74B00F/dst (3 items) OK
+2026-11-10 18:47:42.187 WQAppsCopyTests[1382:6719] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-7EE6BCEC-567F-4E8D-AF21-D0E3AB74B00F/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-7EE6BCEC-567F-4E8D-AF21-D0E3AB74B00F/empty-dst (0 items) OK
 All Apps copy regression tests passed.
 
 == WQAppsSupportTests ==
@@ -126,7 +126,7 @@ All LaunchServices regression tests passed.
 == Python release and static UI checks ==
 
 ----------------------------------------------------------------------
-Ran 16 tests in 0.835s
+Ran 16 tests in 0.763s
 
 OK
 browser UI regression checks: PASS
@@ -136,6 +136,6 @@ iOS syntax and link checks: PASS
 Info.plist: OK
 entitlements.plist: OK
 
-All requested regression suites passed. Logs retained in: /Users/runner/work/WQFiles-redesign/WQFiles-redesign/.work/tests/all.BWv7fv
+All requested regression suites passed. Logs retained in: /Users/runner/work/WQFiles-redesign/WQFiles-redesign/.work/tests/all.nRTe8n
 --- build (tail) ---
 wrote /Users/runner/work/WQFiles-redesign/WQFiles-redesign/WQFiles.ipa
