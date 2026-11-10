@@ -703,7 +703,7 @@ static BOOL WQCacheValidateItem(WQCacheItem *item, NSString **reason)
     if (section == 0 || !_items.count) return nil;
     NSArray<WQCacheItem *> *selected = [_items filteredArrayUsingPredicate:
         [NSPredicate predicateWithFormat:@"selected == YES"]];
-    return [WQCacheFooterScope(selected) stringByAppendingString:@" Close running apps first."];
+    return [WQCacheFooterScope(selected) stringByAppendingString:@" 请先关闭正在运行的应用。"];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -830,7 +830,7 @@ static BOOL WQCacheValidateItem(WQCacheItem *item, NSString **reason)
                      WQCacheConfirmationScope(selected), wq_size_text(sel)];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clean caches?" message:msg
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Clean" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *__unused a) {
         [self clean];
     }]];
