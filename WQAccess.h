@@ -124,6 +124,13 @@ void wq_enumerate_invalidate(void);
 // NO on iOS 26: there worse_query can't reach System Data, the system groups
 // or the App Groups parent folder (only the individual containers).
 BOOL wq_system_areas_reachable(void);
+// Compatibility mode: force the iOS 26 access behaviour on any version. It
+// hides System Data / System Groups, uses the alternative query flags and
+// reads the app/extension containers from the LaunchServices database instead
+// of a full inode scan. Set once at launch, before the first wq_grant; the UI
+// asks for a restart because the query-flag preference is cached per run.
+void wq_set_legacy_scope(BOOL enabled);
+BOOL wq_legacy_scope(void);
 NSArray<NSString *> *_Nullable wq_enumerate(NSString *dir, int64_t maxInode,
                                             WQScanCancellation *_Nullable cancellation,
                                             void (^_Nullable progress)(int64_t done, int64_t total, NSUInteger found));
