@@ -1,0 +1,79 @@
+run_id=42874388405
+sdk=success tests=failure build=skipped
+--- xcode / sdk inventory ---
+== runner ==
+ProductName:		macOS
+ProductVersion:		15.8.2
+BuildVersion:		24H232
+arm64
+== Xcode apps ==
+/Applications/Xcode_16.0.0.app
+/Applications/Xcode_16.0.app
+/Applications/Xcode_16.1.0.app
+/Applications/Xcode_16.1.app
+/Applications/Xcode_16.2.0.app
+/Applications/Xcode_16.2.app
+/Applications/Xcode_16.3.0.app
+/Applications/Xcode_16.3.app
+/Applications/Xcode_16.4.0.app
+/Applications/Xcode_16.4.app
+/Applications/Xcode_16.app
+/Applications/Xcode_26.0.1.app
+/Applications/Xcode_26.0.app
+/Applications/Xcode_26.1.1.app
+/Applications/Xcode_26.1.app
+/Applications/Xcode_26.2.0.app
+/Applications/Xcode_26.2.app
+/Applications/Xcode_26.3.0.app
+/Applications/Xcode_26.3.app
+/Applications/Xcode.app
+== selected ==
+/Applications/Xcode_16.4.app/Contents/Developer
+Xcode 16.4
+Build version 16F6
+/Applications/Xcode_16.0.0.app -> iPhoneOS.sdk version=18.0
+/Applications/Xcode_16.0.0.app -> iPhoneOS18.0.sdk version=18.0
+/Applications/Xcode_16.0.app -> iPhoneOS.sdk version=18.0
+/Applications/Xcode_16.0.app -> iPhoneOS18.0.sdk version=18.0
+/Applications/Xcode_16.1.0.app -> iPhoneOS.sdk version=18.1
+/Applications/Xcode_16.1.0.app -> iPhoneOS18.1.sdk version=18.1
+/Applications/Xcode_16.1.app -> iPhoneOS.sdk version=18.1
+/Applications/Xcode_16.1.app -> iPhoneOS18.1.sdk version=18.1
+/Applications/Xcode_16.2.0.app -> iPhoneOS.sdk version=18.2
+/Applications/Xcode_16.2.0.app -> iPhoneOS18.2.sdk version=18.2
+/Applications/Xcode_16.2.app -> iPhoneOS.sdk version=18.2
+/Applications/Xcode_16.2.app -> iPhoneOS18.2.sdk version=18.2
+/Applications/Xcode_16.3.0.app -> iPhoneOS.sdk version=18.4
+/Applications/Xcode_16.3.0.app -> iPhoneOS18.4.sdk version=18.4
+/Applications/Xcode_16.3.app -> iPhoneOS.sdk version=18.4
+/Applications/Xcode_16.3.app -> iPhoneOS18.4.sdk version=18.4
+/Applications/Xcode_16.4.0.app -> iPhoneOS.sdk version=18.5
+/Applications/Xcode_16.4.0.app -> iPhoneOS18.5.sdk version=18.5
+/Applications/Xcode_16.4.app -> iPhoneOS.sdk version=18.5
+/Applications/Xcode_16.4.app -> iPhoneOS18.5.sdk version=18.5
+/Applications/Xcode_16.app -> iPhoneOS.sdk version=18.0
+/Applications/Xcode_16.app -> iPhoneOS18.0.sdk version=18.0
+/Applications/Xcode_26.0.1.app -> iPhoneOS.sdk version=26.0
+/Applications/Xcode_26.0.1.app -> iPhoneOS26.0.sdk version=26.0
+/Applications/Xcode_26.0.app -> iPhoneOS.sdk version=26.0
+/Applications/Xcode_26.0.app -> iPhoneOS26.0.sdk version=26.0
+/Applications/Xcode_26.1.1.app -> iPhoneOS.sdk version=26.1
+/Applications/Xcode_26.1.1.app -> iPhoneOS26.1.sdk version=26.1
+/Applications/Xcode_26.1.app -> iPhoneOS.sdk version=26.1
+/Applications/Xcode_26.1.app -> iPhoneOS26.1.sdk version=26.1
+/Applications/Xcode_26.2.0.app -> iPhoneOS.sdk version=26.2
+/Applications/Xcode_26.2.0.app -> iPhoneOS26.2.sdk version=26.2
+/Applications/Xcode_26.2.app -> iPhoneOS.sdk version=26.2
+/Applications/Xcode_26.2.app -> iPhoneOS26.2.sdk version=26.2
+/Applications/Xcode_26.3.0.app -> iPhoneOS.sdk version=26.2
+/Applications/Xcode_26.3.0.app -> iPhoneOS26.2.sdk version=26.2
+/Applications/Xcode_26.3.app -> iPhoneOS.sdk version=26.2
+/Applications/Xcode_26.3.app -> iPhoneOS26.2.sdk version=26.2
+/Applications/Xcode.app -> iPhoneOS.sdk version=18.5
+/Applications/Xcode.app -> iPhoneOS18.5.sdk version=18.5
+Selected /Applications/Xcode_26.3.app
+--- active iphoneos sdk ---
+26.2
+--- tests (tail) ---
+/Users/runner/work/_temp/833f4596-8a04-4919-a567-23f0377a15ca.sh: line 2: ./tests/run_all_tests.sh: Permission denied
+--- build (tail) ---
