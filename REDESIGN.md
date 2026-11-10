@@ -1,62 +1,68 @@
-# Redesign build — what changed
+# 改造版说明
 
-This fork keeps the original worse_query access layer intact and changes two
-things: the reachable scope and the interface.
+本分支保留原有 worse_query 访问层，改动两处：可访问范围与界面。
 
-## Access
+## 访问范围
 
-- `All App Data` is now a first-class root at
-  `/private/var/mobile/Containers/Data`. The per-type folders stay as shortcuts.
-  `WQDirViewController` already accepts any absolute path, so the whole tree is
-  browsable, readable, writable and creatable through the existing
-  `wq_read / wq_write / wq_patch / wq_create_*` APIs.
-- `wq_delete_tree` (new, `WQAccess.m` / `WQAccess.h`) empties a folder through
-  the existing `wq_purge_contents` fd-relative walker — child symbolic links are
-  never followed — and only then removes the folder. Backup storage is refused.
-  It makes **no** file-by-file backup. Enable it with
-  `Settings → File Operations → Delete non-empty folders`; the confirmation
-  states explicitly that nothing is kept and the action cannot be undone.
-- `Go to Path` is now a real form page instead of an alert, defaulting to the
-  all-data root.
-- iOS 26 still hides System Data and system groups: `wq_system_areas_reachable()`
-  reflects the worse_query grant scope, and no toggle pretends otherwise.
-  Root-owned files stay read-only because a sandbox token does not change Unix
-  permissions.
+- 「全部应用数据」作为一级入口，指向 `/private/var/mobile/Containers/Data`。
+  原有按类型划分的目录保留为快捷方式。目录控制器本来就接受任意绝对路径，
+  因此整棵目录树都可通过现有的 `wq_read / wq_write / wq_patch / wq_create_*`
+  查看、修改、写入与新建。
+- 新增 `wq_delete_tree`（`WQAccess.m` / `WQAccess.h`）：先用已有的
+  `wq_purge_contents` 以文件描述符相对方式清空目录（子符号链接一律不跟随），
+  再移除目录本身。备份存储仍拒绝操作，且**不逐份保留副本**。开关位于
+  「设置 → 文件操作 → 删除非空目录」，确认框会写明不保留备份、无法撤销。
+- 「前往路径」改为独立表单页，默认填好全部应用数据根目录。
+- iOS 26 仍隐藏系统数据与系统组：`wq_system_areas_reachable()` 反映
+  worse_query 的实际授权范围，开关不会假装能访问。root 属主的文件依旧只读，
+  沙箱令牌改不了 Unix 权限。
 
-## Interface
+### 兼容模式（针对 iOS 27.0）
 
-`WQDesignTokens.h` is the single source for colours, spacing steps, radii, type
-and icons. Everything else references it.
+官方实测版本是 **27.0.1、27.2 和 26.7.1**，27.0.0 未验证，社区也反馈部分
+27.0.1 设备出现「NO TOKEN」或扫描不完整。代码原本只按主版本号判定：只要
+`majorVersion >= 27` 就显示系统数据／系统组入口，并走 iOS 27 的授权方式与
+全量文件编号扫描。若某个 27.0 构建的授权范围其实更接近 iOS 26，就会表现为
+「入口显示但打不开」或「一直停在扫描」。
 
-- Neutral palette only; emphasis comes from light/dark contrast. No gradients,
-  glows, shadows or coloured accent. All `systemBlue/Red/Orange/Green/...`
-  usages across `main.m`, `WQUI.m`, `WQCache.m`, `WQHexViewer.m` and
-  `WQSQLiteViewer.m` were replaced.
-- Removed the nine-colour service tiles, the emoji keyword rule, filled symbol
-  variants, capsule link buttons, the 40 pt hero icon and the `!`-style warning
-  glyphs. One 1.5 pt outline symbol set in one neutral colour is used instead.
-- Root and browsers use plain grouped lists rather than inset cards; group
-  titles are left aligned, rows share one left edge, and the credits footer is
-  plain text.
-- New `Settings` page: one row per setting, label left / control right, titled
-  groups, generous space between groups, and a single isolated `Reset` action.
-  Only switches that actually change behaviour are present.
-- `Go to Path` form: label above a full-width field, with a fixed 18 pt hint
-  slot reserved for validation messages.
+新增 `wq_set_legacy_scope` / `wq_legacy_scope`：开启后强制按 iOS 26 行为运行，
+具体影响为隐藏系统数据／系统组、改用另一组查询标志、从 LaunchServices 数据库
+读取应用与扩展容器列表。启动时在 `WQSceneDelegate` 读取设置并应用；切换开关后
+界面立即生效，但本次运行已缓存的查询标志需要**彻底退出重开**才能完全生效，
+设置页分组说明里也写明了这一点。日志会记录当前是 `compatibility` 还是
+`native` 范围，便于对照排查。
 
-Both `Show all app data` and `Delete non-empty folders` are persisted in
-`NSUserDefaults` and take effect immediately; the read-only rows describe values
-fixed by the design tokens rather than pretending to be adjustable.
+这不保证修复所有「无法访问」：最常见的原因仍是签名丢失 App Group（日志顶部
+显示 `No App Group`），其次是系统容器本就 root 只读、以及父目录不给令牌时需要
+等待首次扫描。
 
-## Build
+## 界面
 
-`./tests/run_all_tests.sh` and `./build.sh` are unchanged. The `build.yml`
-workflow selects an Xcode carrying an iOS 26 SDK, runs the host regression suite
-(which includes a strict arm64 syntax/link check), builds and validates the IPA,
-then uploads it as an artifact. `probe.yml` only reports the runner's SDK
-inventory.
+`WQDesignTokens.h` 是配色、间距档位、圆角、字体与图标的唯一来源，其余文件只引用它。
 
-The output is ad-hoc signed with an App Group entitlement. Re-sign with
-AltStore / SideStore / Sideloadly while keeping an App Group, then validate on a
-supported device: token issuance, navigation timing, power-loss recovery and
-concurrent target-app writes cannot be verified in CI.
+- 仅用中性色，靠明暗对比强调；无渐变、发光、阴影、彩色强调。`main.m`、
+  `WQUI.m`、`WQCache.m`、`WQHexViewer.m`、`WQSQLiteViewer.m` 里所有
+  `systemBlue/Red/Orange/Green/...` 均已替换。
+- 移除九色服务方块、emoji 关键词规则、实心符号、胶囊链接按钮、40 点大图标、
+  感叹号警告图标，改为统一的单色线性图标。
+- 首页与浏览页用普通分组列表而非外层卡片；分组标题左对齐，行文字统一左边缘，
+  版权信息为纯文字。
+- 新增「设置」页：单条一行、标签居左控件居右、分组加标题、组间大留白，
+  重置单独成组；只保留真正生效的开关。
+- 「前往路径」表单：标签在输入框上方、输入框通栏、固定 18 点错误提示占位。
+- **界面文案已中文化**：首页、容器入口、工具、设置、路径表单、删除确认、
+  扫描窗口、签名提示、常见菜单与错误提示均为中文。少数深层编辑器
+  （plist／十六进制／SQLite 内部菜单）仍沿用原文，技术标识如 `NO TOKEN`、
+  `No App Group` 保留英文以便对照日志。静态回归脚本的断言已同步到中文文案。
+
+「显示全部应用数据」「删除非空目录」「兼容模式」存于 `NSUserDefaults`。
+
+## 构建
+
+`./tests/run_all_tests.sh` 与 `./build.sh` 未改动。`build.yml` 会挑选带 iOS 26 SDK
+的 Xcode、跑主机回归（含严格 arm64 语法／链接检查）、构建并校验 IPA，再把 IPA
+与可读报告提交到仓库；`probe.yml` 只报告 runner 的 SDK 清单。
+
+产物为 ad-hoc 签名并带 App Group 权限。请用 AltStore / SideStore / Sideloadly
+重签并**保留 App Group**，然后在受支持设备上验证：令牌发放、导航时序、掉电恢复
+与目标应用并发写入都无法由 CI 覆盖。
