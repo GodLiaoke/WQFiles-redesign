@@ -1,0 +1,54 @@
+name: Build WQFiles IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select an Xcode carrying an iOS 26 SDK
+        run: |
+          set -euo pipefail
+          chosen=""
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            for sdk in "$app"/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk; do
+              [ -d "$sdk" ] || continue
+              ver=$(/usr/libexec/PlistBuddy -c 'Print :Version' "$sdk/SDKSettings.plist" 2>/dev/null || echo 0.0)
+              if [ "${ver%%.*}" -ge 26 ] 2>/dev/null; then chosen="$app"; break 2; fi
+            done
+          done
+          if [ -n "$chosen" ]; then
+            echo "Selected $chosen"
+            sudo xcode-select -s "$chosen"
+          else
+            echo "No iOS 26 SDK found; inventory follows"
+            xcodebuild -version || true
+            for app in /Applications/Xcode*.app; do
+              echo "---- $app ----"
+              ls "$app"/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/ 2>/dev/null || true
+            done
+          fi
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Host regression suite (includes strict iOS arm64 compile/link)
+        run: ./tests/run_all_tests.sh
+
+      - name: Build and validate IPA
+        env:
+          WQ_SKIP_PREFLIGHT: "1"
+        run: ./build.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: WQFiles-ipa
+          path: WQFiles.ipa
+          if-no-files-found: error
+          retention-days: 7

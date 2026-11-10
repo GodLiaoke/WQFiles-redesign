@@ -1,0 +1,45 @@
+name: SDK Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - name: Installed Xcode versions
+        run: |
+          echo "== Xcode apps =="
+          ls -d /Applications/Xcode*.app 2>/dev/null || echo "(none)"
+          echo "== selected =="
+          xcode-select -p || true
+          xcodebuild -version || true
+
+      - name: iOS SDK inventory
+        run: |
+          found26=0
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            echo "---- $app ----"
+            dev="$app/Contents/Developer"
+            "$dev/usr/bin/xcodebuild" -version 2>/dev/null || true
+            for sdk in "$dev"/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk; do
+              [ -d "$sdk" ] || continue
+              ver=$(/usr/libexec/PlistBuddy -c 'Print :Version' "$sdk/SDKSettings.plist" 2>/dev/null || echo "?")
+              echo "SDK $(basename "$sdk") version=$ver"
+              if [ "${ver%%.*}" -ge 26 ] 2>/dev/null; then found26=1; fi
+            done
+          done
+          echo "HAS_IOS26_SDK=$found26"
+
+      - name: Toolchain prerequisites
+        run: |
+          for t in xcrun plutil codesign zip unzip clang python3 PlistBuddy; do
+            printf '%-12s ' "$t"; command -v "$t" || echo MISSING
+          done
+          echo "== active iphoneos sdk =="
+          xcrun --sdk iphoneos --show-sdk-path || true
+          xcrun --sdk iphoneos --show-sdk-version || true
