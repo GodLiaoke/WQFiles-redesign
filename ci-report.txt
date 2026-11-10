@@ -1,5 +1,5 @@
-run_id=42874604360
-sdk=success tests=failure build=skipped
+run_id=42874931977
+sdk=success tests=success build=success
 --- xcode / sdk inventory ---
 == runner ==
 ProductName:		macOS
@@ -105,8 +105,8 @@ PASS: tree copy preserves symlink item without following it
 PASS: copied symlink remains a symlink
 
 == WQAppsCopyTests ==
-2026-11-10 18:23:19.159 WQAppsCopyTests[1447:7005] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-146BF50A-29B0-45B0-A3D5-128060413BD5/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-146BF50A-29B0-45B0-A3D5-128060413BD5/dst (3 items) OK
-2026-11-10 18:23:19.161 WQAppsCopyTests[1447:7005] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-146BF50A-29B0-45B0-A3D5-128060413BD5/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-146BF50A-29B0-45B0-A3D5-128060413BD5/empty-dst (0 items) OK
+2026-11-10 18:25:19.029 WQAppsCopyTests[1490:7075] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-46C6765E-FAFF-4E15-9267-A3FFF2E14751/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-46C6765E-FAFF-4E15-9267-A3FFF2E14751/dst (3 items) OK
+2026-11-10 18:25:19.030 WQAppsCopyTests[1490:7075] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-46C6765E-FAFF-4E15-9267-A3FFF2E14751/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-46C6765E-FAFF-4E15-9267-A3FFF2E14751/empty-dst (0 items) OK
 All Apps copy regression tests passed.
 
 == WQAppsSupportTests ==
@@ -126,23 +126,16 @@ All LaunchServices regression tests passed.
 == Python release and static UI checks ==
 
 ----------------------------------------------------------------------
-Ran 16 tests in 0.814s
+Ran 16 tests in 1.064s
 
 OK
 browser UI regression checks: PASS
 
 == Strict iOS arm64 syntax/link checks ==
-main.m:1418:36: error: call to undeclared function 'WQSettingBool'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
- 1418 |     BOOL recursive = item.isDir && WQSettingBool(WQSettingDeleteTree, NO);
-      |                                    ^
-main.m:1418:50: error: use of undeclared identifier 'WQSettingDeleteTree'
- 1418 |     BOOL recursive = item.isDir && WQSettingBool(WQSettingDeleteTree, NO);
-      |                                                  ^
-main.m:1720:13: error: static declaration of 'WQSettingBool' follows non-static declaration
- 1720 | static BOOL WQSettingBool(NSString *key, BOOL fallback)
-      |             ^
-main.m:1418:36: note: previous implicit declaration is here
- 1418 |     BOOL recursive = item.isDir && WQSettingBool(WQSettingDeleteTree, NO);
-      |                                    ^
-3 errors generated.
+iOS syntax and link checks: PASS
+Info.plist: OK
+entitlements.plist: OK
+
+All requested regression suites passed. Logs retained in: /Users/runner/work/WQFiles-redesign/WQFiles-redesign/.work/tests/all.KaQ1iG
 --- build (tail) ---
+wrote /Users/runner/work/WQFiles-redesign/WQFiles-redesign/WQFiles.ipa
