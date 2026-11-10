@@ -121,7 +121,7 @@ void wq_share(UIViewController *host, NSString *path, UIView *source)
 {
     if (!host) return;
     if (wq_share_in_flight(host)) {
-        wq_alert(host, @"Share in progress", @"Wait for the current share to finish before starting another.");
+        wq_alert(host, @"正在分享", @"Wait for the current share to finish before starting another.");
         return;
     }
     objc_setAssociatedObject(host, &kWQShareInFlightKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -132,7 +132,7 @@ void wq_share(UIViewController *host, NSString *path, UIView *source)
         NSString *tmp = nil;
         BOOL ok = NO;
         if (!wq_shareable_regular_file(path)) {
-            error = @"Only regular files can be shared.";
+            error = @"只能分享普通文件。";
         } else {
             outDir = wq_unique_export_directory();
             tmp = outDir ? [outDir stringByAppendingPathComponent:path.lastPathComponent] : nil;
@@ -165,14 +165,14 @@ void wq_share_folder(UIViewController *host, NSString *dir, NSString *zipName, U
 {
     if (!wq_share_host_is_active(host)) return;
     if (wq_share_in_flight(host)) {
-        wq_alert(host, @"Share in progress", @"Wait for the current share to finish before starting another.");
+        wq_alert(host, @"正在分享", @"Wait for the current share to finish before starting another.");
         return;
     }
     WQSharePreparation *preparation = [WQSharePreparation new];
     preparation.host = host;
     UIAlertController *hud = [UIAlertController alertControllerWithTitle:@"Preparing…"
         message:@"Compressing the folder" preferredStyle:UIAlertControllerStyleAlert];
-    [hud addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *__unused action) {
+    [hud addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *__unused action) {
         preparation.cancelled = YES;
         objc_setAssociatedObject(host, &kWQSharePreparationKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [host dismissViewControllerAnimated:YES completion:nil];
