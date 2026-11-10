@@ -168,8 +168,27 @@ static int64_t wq_query_token(NSString *group, BOOL altFlags)
     }
 }
 
+// Some early iOS 27.0 builds report majorVersion 27 but behave like iOS 26:
+// they do not grant tokens to the container parents. Compatibility mode lets
+// those devices use the iOS 26 path instead of showing entries that cannot open
+// and starting an inode scan that never yields useful containers.
+static BOOL gLegacyScope;
+
+void wq_set_legacy_scope(BOOL enabled)
+{
+    gLegacyScope = enabled;
+    wq_log(@"access: %@ scope (system areas %@)", enabled ? @"compatibility" : @"native",
+           enabled ? @"hidden" : @"visible on iOS 27");
+}
+
+BOOL wq_legacy_scope(void)
+{
+    return gLegacyScope;
+}
+
 BOOL wq_system_areas_reachable(void)
 {
+    if (gLegacyScope) return NO;
     // worse_query reaches System Data, the system groups and the App Groups
     // parent only on iOS 27; on iOS 26 it reaches the individual app,
     // extension, daemon and app group containers.
