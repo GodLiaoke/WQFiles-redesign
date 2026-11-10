@@ -26,6 +26,13 @@
 #import "WQSQLiteViewer.h"
 #import "WQDesignTokens.h"
 
+// Settings keys and helpers are defined with the settings controllers below,
+// but the file browser calls them earlier, so declare them up front.
+static NSString *const WQSettingShowAllData = @"WQSettingShowAllData";
+static NSString *const WQSettingDeleteTree = @"WQSettingDeleteTree";
+static BOOL WQSettingBool(NSString *key, BOOL fallback);
+static void WQSettingSetBool(NSString *key, BOOL value);
+
 static BOOL wq_looks_like_uuid(NSString *name)
 {
     return name.length == 36 && [[NSUUID alloc] initWithUUIDString:name] != nil;
@@ -1714,9 +1721,6 @@ static NSString *const kSystemGroupRoot = @"/private/var/containers/Shared/Syste
 
 #pragma mark - Settings and path form
 
-static NSString *const WQSettingShowAllData = @"WQSettingShowAllData";
-static NSString *const WQSettingDeleteTree = @"WQSettingDeleteTree";
-
 static BOOL WQSettingBool(NSString *key, BOOL fallback)
 {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -1872,7 +1876,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
     NSUInteger section = (NSUInteger)(sender.tag / 100);
     NSUInteger index = (NSUInteger)(sender.tag % 100);
     if (section >= _rows.count || index >= _rows[section].count) return;
-    WQSettingSetBool(_rows[section][index].key, sender.on);
+    WQSettingRow *row = _rows[section][index];
+    WQSettingSetBool(row.key, sender.on);
 }
 
 - (void)resetTapped
