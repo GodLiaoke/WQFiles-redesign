@@ -44,7 +44,7 @@ jobs:
         id: tests
         run: |
           set -o pipefail
-          ./tests/run_all_tests.sh 2>&1 | tee ci/tests.log
+          bash ./tests/run_all_tests.sh 2>&1 | tee ci/tests.log
 
       - name: Build and validate IPA
         id: build
@@ -52,7 +52,7 @@ jobs:
           WQ_SKIP_PREFLIGHT: "1"
         run: |
           set -o pipefail
-          ./build.sh 2>&1 | tee ci/build.log
+          bash ./build.sh 2>&1 | tee ci/build.log
 
       - name: Publish readable report
         if: always()
