@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -13,39 +13,70 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Select an Xcode carrying an iOS 26 SDK
+        id: sdk
         run: |
           set -euo pipefail
+          mkdir -p ci
+          {
+            echo "== runner =="; sw_vers; uname -m
+            echo "== Xcode apps =="; ls -d /Applications/Xcode*.app 2>/dev/null || echo "(none)"
+            echo "== selected =="; xcode-select -p || true; xcodebuild -version || true
+          } | tee ci/xcode.txt
           chosen=""
           for app in /Applications/Xcode*.app; do
             [ -d "$app" ] || continue
             for sdk in "$app"/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk; do
               [ -d "$sdk" ] || continue
               ver=$(/usr/libexec/PlistBuddy -c 'Print :Version' "$sdk/SDKSettings.plist" 2>/dev/null || echo 0.0)
-              if [ "${ver%%.*}" -ge 26 ] 2>/dev/null; then chosen="$app"; break 2; fi
+              echo "$app -> $(basename "$sdk") version=$ver" | tee -a ci/xcode.txt
+              if [ "${ver%%.*}" -ge 26 ] 2>/dev/null; then chosen="$app"; fi
             done
           done
           if [ -n "$chosen" ]; then
-            echo "Selected $chosen"
+            echo "Selected $chosen" | tee -a ci/xcode.txt
             sudo xcode-select -s "$chosen"
           else
-            echo "No iOS 26 SDK found; inventory follows"
-            xcodebuild -version || true
-            for app in /Applications/Xcode*.app; do
-              echo "---- $app ----"
-              ls "$app"/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/ 2>/dev/null || true
-            done
+            echo "No iOS 26 SDK found" | tee -a ci/xcode.txt
           fi
-          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphoneos --show-sdk-version | tee ci/sdk-version.txt
 
-      - name: Host regression suite (includes strict iOS arm64 compile/link)
-        run: ./tests/run_all_tests.sh
+      - name: Host regression suite
+        id: tests
+        run: |
+          set -o pipefail
+          ./tests/run_all_tests.sh 2>&1 | tee ci/tests.log
 
       - name: Build and validate IPA
+        id: build
         env:
           WQ_SKIP_PREFLIGHT: "1"
-        run: ./build.sh
+        run: |
+          set -o pipefail
+          ./build.sh 2>&1 | tee ci/build.log
+
+      - name: Publish readable report
+        if: always()
+        run: |
+          {
+            echo "run_id=${{ github.run_id }}"
+            echo "sdk=${{ steps.sdk.outcome }} tests=${{ steps.tests.outcome }} build=${{ steps.build.outcome }}"
+            echo "--- xcode / sdk inventory ---"
+            cat ci/xcode.txt 2>/dev/null || true
+            echo "--- active iphoneos sdk ---"
+            cat ci/sdk-version.txt 2>/dev/null || true
+            echo "--- tests (tail) ---"
+            tail -120 ci/tests.log 2>/dev/null || true
+            echo "--- build (tail) ---"
+            tail -120 ci/build.log 2>/dev/null || true
+          } > ci-report.txt
+          git config user.email "ci@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add -f ci-report.txt
+          git commit -m "ci: report for run ${{ github.run_id }}" || echo "no report change"
+          git push origin HEAD:main || echo "report push failed"
 
       - name: Upload IPA
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: WQFiles-ipa
