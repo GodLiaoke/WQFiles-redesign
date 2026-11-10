@@ -1,4 +1,4 @@
-run_id=42874388405
+run_id=42874604360
 sdk=success tests=failure build=skipped
 --- xcode / sdk inventory ---
 == runner ==
@@ -75,5 +75,74 @@ Selected /Applications/Xcode_26.3.app
 --- active iphoneos sdk ---
 26.2
 --- tests (tail) ---
-/Users/runner/work/_temp/833f4596-8a04-4919-a567-23f0377a15ca.sh: line 2: ./tests/run_all_tests.sh: Permission denied
+
+== WQCoreTests ==
+All WQCore regression tests passed.
+
+== WQAccessSafetyTests ==
+PASS: set traversal-only ancestor permissions
+PASS: no-follow walk does not require ancestor enumeration
+PASS: grammar rejects traversal and ambiguous empty components
+
+== WQAccessMutationTests ==
+PASS: unavailable inode probe is failure, not silent fixed-range success
+PASS: explicit small bound still supports successful empty enumeration
+PASS: overflowing scan bound is rejected before work dispatch
+
+== WQAccessTreeTests ==
+PASS: write temp sentinel
+PASS: write racing creator
+PASS: race preserves whichever destination wins exclusion
+
+== WQAccessMeasureTests ==
+PASS: unreadable subtree marks the whole measurement limited
+PASS: limited measurement still reports the readable bytes
+All WQAccess measure regression tests passed.
+
+== WQAccessCopyTests ==
+PASS: create tree symlink child
+PASS: tree copy preserves symlink item without following it
+PASS: copied symlink remains a symlink
+
+== WQAppsCopyTests ==
+2026-11-10 18:23:19.159 WQAppsCopyTests[1447:7005] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-146BF50A-29B0-45B0-A3D5-128060413BD5/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-146BF50A-29B0-45B0-A3D5-128060413BD5/dst (3 items) OK
+2026-11-10 18:23:19.161 WQAppsCopyTests[1447:7005] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-146BF50A-29B0-45B0-A3D5-128060413BD5/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-146BF50A-29B0-45B0-A3D5-128060413BD5/empty-dst (0 items) OK
+All Apps copy regression tests passed.
+
+== WQAppsSupportTests ==
+All Apps manifest/order/tree regression tests passed.
+
+== WQCacheSafetyTests ==
+WQCacheSafetyTests: passed
+
+== WQPlistEditorSupportTests ==
+All WQPlistEditorSupport regression tests passed.
+
+== WQHexViewerHelpersTests ==
+
+== WQLaunchServicesTests ==
+All LaunchServices regression tests passed.
+
+== Python release and static UI checks ==
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.814s
+
+OK
+browser UI regression checks: PASS
+
+== Strict iOS arm64 syntax/link checks ==
+main.m:1418:36: error: call to undeclared function 'WQSettingBool'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+ 1418 |     BOOL recursive = item.isDir && WQSettingBool(WQSettingDeleteTree, NO);
+      |                                    ^
+main.m:1418:50: error: use of undeclared identifier 'WQSettingDeleteTree'
+ 1418 |     BOOL recursive = item.isDir && WQSettingBool(WQSettingDeleteTree, NO);
+      |                                                  ^
+main.m:1720:13: error: static declaration of 'WQSettingBool' follows non-static declaration
+ 1720 | static BOOL WQSettingBool(NSString *key, BOOL fallback)
+      |             ^
+main.m:1418:36: note: previous implicit declaration is here
+ 1418 |     BOOL recursive = item.isDir && WQSettingBool(WQSettingDeleteTree, NO);
+      |                                    ^
+3 errors generated.
 --- build (tail) ---
