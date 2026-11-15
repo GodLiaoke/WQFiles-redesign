@@ -1,4 +1,4 @@
-run_id=43753583938
+run_id=43754571567
 sdk=success tests=failure build=skipped
 --- xcode / sdk inventory ---
 == runner ==
@@ -105,8 +105,8 @@ PASS: tree copy preserves symlink item without following it
 PASS: copied symlink remains a symlink
 
 == WQAppsCopyTests ==
-2026-11-15 19:39:06.230 WQAppsCopyTests[1890:8154] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-4C26B88C-B7D9-46CA-A5AC-AB1701C8E7AD/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-4C26B88C-B7D9-46CA-A5AC-AB1701C8E7AD/dst (3 items) OK
-2026-11-15 19:39:06.231 WQAppsCopyTests[1890:8154] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-4C26B88C-B7D9-46CA-A5AC-AB1701C8E7AD/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-4C26B88C-B7D9-46CA-A5AC-AB1701C8E7AD/empty-dst (0 items) OK
+2026-11-15 19:49:52.509 WQAppsCopyTests[2334:10375] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-250A4C70-26C5-4183-B5C1-7A57F127341A/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-250A4C70-26C5-4183-B5C1-7A57F127341A/dst (3 items) OK
+2026-11-15 19:49:52.511 WQAppsCopyTests[2334:10375] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-250A4C70-26C5-4183-B5C1-7A57F127341A/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-250A4C70-26C5-4183-B5C1-7A57F127341A/empty-dst (0 items) OK
 All Apps copy regression tests passed.
 
 == WQAppsSupportTests ==
@@ -126,38 +126,14 @@ All LaunchServices regression tests passed.
 == Python release and static UI checks ==
 
 ----------------------------------------------------------------------
-Ran 16 tests in 0.583s
+Ran 16 tests in 0.666s
 
 OK
 browser UI regression checks: PASS
 
 == Strict iOS arm64 syntax/link checks ==
-WQLuaDeploy.m:272:66: error: passing address of non-local object to __autoreleasing parameter for write-back
-  272 |     UITableViewCell *c0 = [self rowCellWithTitle:@"容器" value:&_containerValue button:nil action:NULL];
-      |                                                                ^~~~~~~~~~~~~~~~
-WQLuaDeploy.m:273:72: error: passing address of non-local object to __autoreleasing parameter for write-back
-  273 |     UITableViewCell *c1 = [self rowCellWithTitle:@"基线目录" value:&_baseValue button:nil action:NULL];
-      |                                                                    ^~~~~~~~~~~
-WQLuaDeploy.m:274:72: error: passing address of non-local object to __autoreleasing parameter for write-back
-  274 |     UITableViewCell *c2 = [self rowCellWithTitle:@"定位方式" value:&_modeValue button:nil action:NULL];
-      |                                                                    ^~~~~~~~~~~
-WQLuaDeploy.m:278:65: error: passing address of non-local object to __autoreleasing parameter for write-back
-  278 |         hint:@"相对 Saved，缺失层级才会新建" hintOut:&_chainHint height:0];
-      |                                                      ^~~~~~~~~~~
-WQLuaDeploy.m:280:47: error: passing address of non-local object to __autoreleasing parameter for write-back
-  280 |         hint:@"留空则自动定位" hintOut:&_uuidHint height:0];
-      |                                        ^~~~~~~~~~
-WQLuaDeploy.m:283:64: error: passing address of non-local object to __autoreleasing parameter for write-back
-  283 |         hint:@"不含路径分隔符，自动补 .lua" hintOut:&_nameHint height:0];
-      |                                                     ^~~~~~~~~~
-WQLuaDeploy.m:285:62: error: passing address of non-local object to __autoreleasing parameter for write-back
-  285 |         hint:@"可粘贴，或从「文件」导入" hintOut:&_contentHint height:0];
-      |                                                  ^~~~~~~~~~~~~
-WQLuaDeploy.m:287:72: error: passing address of non-local object to __autoreleasing parameter for write-back
-  287 |     UITableViewCell *g3 = [self rowCellWithTitle:@"当前脚本" value:&_scriptValue button:nil action:NULL];
-      |                                                                    ^~~~~~~~~~~~~
-WQLuaDeploy.m:290:72: error: passing address of non-local object to __autoreleasing parameter for write-back
-  290 |     UITableViewCell *h0 = [self rowCellWithTitle:@"最近结果" value:&_resultValue button:nil action:NULL];
-      |                                                                    ^~~~~~~~~~~~~
-9 errors generated.
+WQGameFeatures.m:478:9: error: dereferencing a __weak pointer is not allowed due to possible null value caused by race condition, assign it to strong variable first
+  478 |         weakSelf->_paths = all;
+      |         ^
+1 error generated.
 --- build (tail) ---
