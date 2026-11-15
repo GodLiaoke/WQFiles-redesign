@@ -529,13 +529,17 @@ static NSArray<NSDictionary *> *WQGameRanked(NSArray<NSDictionary *> *items,
         NSInteger rank = WQGameMatchRank(fields(item), tokens);
         if (rank >= 0) [ranked addObject:@{@"item": item, @"rank": @(rank)}];
     }
-    [ranked sortUsingDescriptors:@[
-        [NSSortDescriptor sortDescriptorWithKey:@"rank" ascending:YES],
-        [NSSortDescriptor sortDescriptorWithKey:[@"item." stringByAppendingString:nameKey]
-                                      ascending:YES
-                                       selector:@selector(localizedCaseInsensitiveCompare:)],
-    ]];
-    return [ranked valueForKey:@"item"] ?: @[];
+    // An explicit comparator avoids KVC key paths ("item.name") on plain
+    // dictionaries and never sends a compare selector to a nil value.
+    [ranked sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        NSInteger ra = [a[@"rank"] integerValue], rb = [b[@"rank"] integerValue];
+        if (ra != rb) return ra < rb ? NSOrderedAscending : NSOrderedDescending;
+        NSString *na = a[@"item"][nameKey] ?: @"", *nb = b[@"item"][nameKey] ?: @"";
+        return [na localizedCaseInsensitiveCompare:nb];
+    }];
+    NSMutableArray<NSDictionary *> *result = [NSMutableArray arrayWithCapacity:ranked.count];
+    for (NSDictionary *box in ranked) [result addObject:box[@"item"]];
+    return result;
 }
 
 // Bold-only emphasis: same neutral text colour, no highlight fill or accent.
@@ -755,6 +759,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
                                          (unsigned long)WQGamePreviewCount];
             cell.imageView.image = WQLinearIcon(@"chevron.down");
         } else {
+            if (idx >= _visibleApps.count) return cell;   // defensive: never index a stale row
             NSDictionary *a = _visibleApps[idx];
             BOOL exact = [a[@"exact"] boolValue];
             NSString *title = exact ? [NSString stringWithFormat:@"%@ · 已验证路径", a[@"name"]]
