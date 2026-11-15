@@ -26,6 +26,10 @@ BOOL wq_grant(NSString *path);
 
 // Directory listing; asks for access when the plain call is refused.
 NSArray<NSString *> *_Nullable wq_list(NSString *dir, NSString *_Nullable *_Nullable errorText);
+// Fast path for screens that only need subfolders: one opendir/readdir pass
+// uses d_type instead of an lstat (and a possible sandbox grant) per child.
+// Symbolic links are never followed. Nil means the folder could not be read.
+NSArray<NSString *> *_Nullable wq_list_child_dirs(NSString *dir, NSString *_Nullable *_Nullable errorText);
 
 // Reads a whole file (up to maxBytes; 0 = no limit).
 NSData *_Nullable wq_read(NSString *path, NSUInteger maxBytes, NSString *_Nullable *_Nullable errorText);

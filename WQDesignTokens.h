@@ -110,4 +110,44 @@ WQ_INLINE void WQStylePrimaryButton(UIButton *button)
     button.titleLabel.font = WQFontBody();
 }
 
+#pragma mark - 全局设置（多个视图共用，键只在这里定义一次）
+
+#define WQSettingShowAllDataKey     @"WQSettingShowAllData"
+#define WQSettingLegacyScopeKey     @"WQSettingLegacyScope"
+#define WQSettingDeleteTreeKey      @"WQSettingDeleteTree"
+#define WQSettingFastDirKey         @"WQSettingFastDir"
+#define WQSettingParallelWriteKey   @"WQSettingParallelWrite"
+#define WQSettingDetectCacheKey     @"WQSettingDetectCache"
+#define WQSettingCompactRowsKey     @"WQSettingCompactRows"
+#define WQSettingReloadAgeIdxKey    @"WQSettingReloadAgeIdx"
+
+// A missing key means "use the default", so turning a switch off is distinct
+// from never having touched it.
+WQ_INLINE BOOL WQSettingGet(NSString *key, BOOL fallback)
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    return [d objectForKey:key] ? [d boolForKey:key] : fallback;
+}
+
+WQ_INLINE void WQSettingPut(NSString *key, BOOL value)
+{
+    [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
+}
+
+// How long a directory listing stays fresh when returning to a screen.
+// The old fixed 2 seconds made every back-navigation re-read the whole folder.
+WQ_INLINE NSTimeInterval WQSettingReloadAge(void)
+{
+    NSInteger idx = [NSUserDefaults.standardUserDefaults integerForKey:WQSettingReloadAgeIdxKey];
+    if (idx == 0) return 15.0;
+    if (idx == 2) return 300.0;
+    return 60.0;
+}
+
+WQ_INLINE NSString *WQSettingReloadAgeText(void)
+{
+    NSInteger idx = [NSUserDefaults.standardUserDefaults integerForKey:WQSettingReloadAgeIdxKey];
+    return idx == 0 ? @"15 秒" : (idx == 2 ? @"5 分钟" : @"1 分钟");
+}
+
 NS_ASSUME_NONNULL_END

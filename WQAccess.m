@@ -738,6 +738,39 @@ NSArray<NSString *> *wq_list(NSString *dir, NSString **errorText)
     return items;
 }
 
+NSArray<NSString *> *wq_list_child_dirs(NSString *dir, NSString **errorText)
+{
+    int saved = errno;
+    DIR *handle = opendir(dir.fileSystemRepresentation);
+    if (!handle && wq_grant(dir)) handle = opendir(dir.fileSystemRepresentation);
+    if (!handle) {
+        if (errorText) *errorText = wq_errno(errno);
+        errno = saved;
+        return nil;
+    }
+    int fd = dirfd(handle);
+    NSMutableArray<NSString *> *dirs = [NSMutableArray new];
+    struct dirent *entry;
+    while ((entry = readdir(handle)) != NULL) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        BOOL isDir = entry->d_type == DT_DIR;
+        // DT_UNKNOWN: resolve with a single fd-relative lstat, still no follow.
+        // DT_LNK stays out: this app never follows symbolic links.
+        if (entry->d_type == DT_UNKNOWN && fd >= 0) {
+            struct stat st;
+            isDir = fstatat(fd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0 && S_ISDIR(st.st_mode);
+        }
+        if (!isDir) continue;
+        NSString *name = [NSString stringWithCString:entry->d_name encoding:NSUTF8StringEncoding]
+                      ?: [NSString stringWithCString:entry->d_name encoding:NSISOLatin1StringEncoding];
+        if (name.length) [dirs addObject:name];
+    }
+    closedir(handle);
+    [dirs sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    errno = saved;
+    return dirs;
+}
+
 static int wq_open(NSString *path, int flags, mode_t mode)
 {
     if (flags & O_TRUNC) { errno = EINVAL; return -1; }

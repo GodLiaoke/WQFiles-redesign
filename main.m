@@ -27,13 +27,21 @@
 #import "WQDesignTokens.h"
 #import "WQGameFeatures.h"
 
-// Settings keys and helpers are defined with the settings controllers below,
-// but the file browser calls them earlier, so declare them up front.
-static NSString *const WQSettingShowAllData = @"WQSettingShowAllData";
-static NSString *const WQSettingDeleteTree = @"WQSettingDeleteTree";
-static NSString *const WQSettingLegacyScope = @"WQSettingLegacyScope";
+// Settings keys live in WQDesignTokens.h so the settings page, the file
+// browser and the game module all read the same values. The two helpers are
+// defined with the settings controllers below; declare them up front.
 static BOOL WQSettingBool(NSString *key, BOOL fallback);
 static void WQSettingSetBool(NSString *key, BOOL value);
+
+// NSCache is thread-safe and evicts under memory pressure. Container paths are
+// stable for the lifetime of an install, so resolved identifiers are reusable.
+static NSCache<NSString *, NSDictionary *> *WQContainerInfoCache(void)
+{
+    static NSCache<NSString *, NSDictionary *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSCache new]; cache.countLimit = 2000; });
+    return cache;
+}
 
 static BOOL wq_looks_like_uuid(NSString *name)
 {
@@ -705,7 +713,9 @@ static NSString *wq_index_letter(NSString *name)
     [super viewWillAppear:animated];
     if (_scanInFlight) return;
     NSTimeInterval age = NSDate.date.timeIntervalSinceReferenceDate - _lastReloadFinished;
-    if (_scanNeedsRefresh || _lastReloadFinished <= 0 || age > 2.0) [self reload];
+    // Returning from a child screen used to re-read the whole folder every 2s.
+    // A fresh listing is reused; the interval is configurable in Settings.
+    if (_scanNeedsRefresh || _lastReloadFinished <= 0 || age > WQSettingReloadAge()) [self reload];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
@@ -1042,19 +1052,30 @@ static NSString *wq_index_letter(NSString *name)
             item.path = haveFullPaths ? entry : [path stringByAppendingPathComponent:entry];
             NSString *name = item.name;
             // Enumerated containers need a token before they can be stat'd.
+            // Resolving hundreds of identifiers is the slow part, so reuse it.
             if (haveFullPaths) {
                 item.isDir = YES;
-                BOOL token = wq_grant(item.path);
-                NSString *bid = token ? wq_container_label(item.path) : nil;
-                item.bundleID = bid;
-                if (bid) (void)wq_app_icon(bid);   // warm the icon off the main thread
-                item.label = token ? (wq_display_name(bid) ?: bid ?: @"(no label)") : @"NO TOKEN";
-                if (!token && labelIssues < 3) {
-                    wq_log(@"label: no token for %@", item.path);
-                    labelIssues++;
-                } else if (token && !bid.length && labelIssues < 3) {
-                    wq_log(@"label: no container identifier for %@", item.path);
-                    labelIssues++;
+                NSDictionary *cached = [WQContainerInfoCache() objectForKey:item.path];
+                if (cached) {
+                    item.bundleID = cached[@"bid"];
+                    item.label = cached[@"label"];
+                } else {
+                    BOOL token = wq_grant(item.path);
+                    NSString *bid = token ? wq_container_label(item.path) : nil;
+                    item.bundleID = bid;
+                    if (bid) (void)wq_app_icon(bid);   // warm the icon off the main thread
+                    item.label = token ? (wq_display_name(bid) ?: bid ?: @"(no label)") : @"NO TOKEN";
+                    // "NO TOKEN" can be temporary; only cache a resolved label.
+                    if (token && item.label.length && ![item.label isEqualToString:@"NO TOKEN"])
+                        [WQContainerInfoCache() setObject:@{@"bid": bid ?: @"", @"label": item.label}
+                                                    forKey:item.path];
+                    if (!token && labelIssues < 3) {
+                        wq_log(@"label: no token for %@", item.path);
+                        labelIssues++;
+                    } else if (token && !bid.length && labelIssues < 3) {
+                        wq_log(@"label: no container identifier for %@", item.path);
+                        labelIssues++;
+                    }
                 }
             }
             struct stat st;
@@ -1423,7 +1444,7 @@ static NSString *wq_index_letter(NSString *name)
 
 - (void)confirmDelete:(WQItem *)item
 {
-    BOOL recursive = item.isDir && WQSettingBool(WQSettingDeleteTree, NO);
+    BOOL recursive = item.isDir && WQSettingBool(WQSettingDeleteTreeKey, NO);
     NSString *message;
     if (item.isLink) {
         message = [NSString stringWithFormat:@"%@\n\n仅移除符号链接本身，不改动其目标。", item.path];
@@ -1724,14 +1745,23 @@ static NSString *const kSystemGroupRoot = @"/private/var/containers/Shared/Syste
 
 static BOOL WQSettingBool(NSString *key, BOOL fallback)
 {
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    return [defaults objectForKey:key] ? [defaults boolForKey:key] : fallback;
+    return WQSettingGet(key, fallback);
 }
 
 static void WQSettingSetBool(NSString *key, BOOL value)
 {
-    [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
+    WQSettingPut(key, value);
 }
+
+// Each row is one line: label on the left, control or value on the right.
+// Actions carry a numeric tag; dynamic rows recompute their value on reload.
+typedef NS_ENUM(NSInteger, WQSettingAction) {
+    WQSettingActionClearStaging  = 1,
+    WQSettingActionClearCache    = 2,
+    WQSettingActionOpenBackups   = 3,
+    WQSettingActionClearPaths    = 4,
+    WQSettingActionResetAll      = 5,
+};
 
 @interface WQSettingRow : NSObject
 @property (nonatomic, copy) NSString *title;
@@ -1739,6 +1769,8 @@ static void WQSettingSetBool(NSString *key, BOOL value)
 @property (nonatomic, copy) NSString *value;
 @property (nonatomic) BOOL isSwitch;
 @property (nonatomic) BOOL isAction;
+@property (nonatomic) BOOL tappable;
+@property (nonatomic) WQSettingAction action;
 @end
 
 @implementation WQSettingRow
@@ -1761,17 +1793,32 @@ static WQSettingRow *WQValueRow(NSString *title, NSString *value)
     return row;
 }
 
-static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
+static WQSettingRow *WQDynamicRow(NSString *title, NSString *key)
+{
+    WQSettingRow *row = WQValueRow(title, @"");
+    row.key = key;
+    return row;
+}
+
+static WQSettingRow *WQTapRow(NSString *title, NSString *key)
+{
+    WQSettingRow *row = WQDynamicRow(title, key);
+    row.tappable = YES;
+    return row;
+}
+
+static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSettingAction action)
 {
     WQSettingRow *row = [WQSettingRow new];
     row.title = title;
     row.value = buttonTitle;
     row.isAction = YES;
+    row.action = action;
     return row;
 }
 
 // Settings are single rows: label on the left, control on the right, no outer
-// card, generous space between groups, and one isolated reset action.
+// card, generous space between groups, and dangerous actions isolated last.
 @interface WQSettingsViewController : UITableViewController
 @end
 
@@ -1785,28 +1832,39 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
 {
     if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
         self.title = @"设置";
-        _titles = @[@"访问范围", @"文件操作", @"界面", @"重置"];
+        _titles = @[@"访问范围", @"性能", @"存储与缓存", @"界面", @"文件操作", @"危险操作"];
         _footers = @[
             @"全部应用数据会遍历整棵容器目录树。若 iOS 27.0 上系统数据打不开、或列表一直停在扫描，请开启兼容模式并彻底退出后重开：它会隐藏系统区域，改用 iOS 26 的授权方式与容器列表。切换后需重启才能完全生效。",
-            @"递归删除会清空目录内容，且不逐份保留备份。",
-            @"界面参数由统一设计变量固定，不提供调整。",
-            @"仅重置访问相关开关，不会改动任何备份。",
+            @"快速目录读取用一次目录遍历拿到子文件夹，避免逐个子项授权；并行写入同时处理多个资源文件；检测缓存复用已解析的应用标识。列表缓存时长决定返回页面时是否重读目录。全部开关即时生效。",
+            @"注入暂存是导入后、写入前的临时副本。正常写入会自动清理，异常退出可能留下残留。备份不会被这里的清理操作删除。",
+            @"配色、圆角与间距由统一设计变量固定；紧凑行高只改变列表密度。",
+            @"递归删除会清空目录内容，且不逐份保留备份。覆盖与保存校验由访问层固定开启，不提供关闭。",
+            @"以下操作不可撤销。清空路径只移除本应用保存的记录，不会删除游戏目录里的文件；重置设置会恢复全部开关默认值，但保留备份与注入路径。",
         ];
-        NSString *mode = wq_legacy_scope() ? @"兼容模式"
-            : (wq_system_areas_reachable() ? @"iOS 27 原生" : @"iOS 26 方式");
         _rows = @[
-            @[WQSwitchRow(@"显示全部应用数据", WQSettingShowAllData),
-              WQSwitchRow(@"兼容模式", WQSettingLegacyScope),
-              WQValueRow(@"当前运行模式", mode),
+            @[WQSwitchRow(@"显示全部应用数据", WQSettingShowAllDataKey),
+              WQSwitchRow(@"兼容模式", WQSettingLegacyScopeKey),
+              WQDynamicRow(@"当前运行模式", @"mode"),
               WQValueRow(@"数据根目录", @"/private/var/mobile/Containers/Data")],
-            @[WQSwitchRow(@"删除非空目录", WQSettingDeleteTree),
-              WQValueRow(@"覆盖前保留副本", @"开启"),
-              WQValueRow(@"保存时校验版本", @"开启")],
+            @[WQSwitchRow(@"快速目录读取", WQSettingFastDirKey),
+              WQSwitchRow(@"并行写入资源", WQSettingParallelWriteKey),
+              WQSwitchRow(@"缓存应用检测", WQSettingDetectCacheKey),
+              WQTapRow(@"列表缓存时长", @"reloadAge")],
+            @[WQDynamicRow(@"注入暂存", @"staging"),
+              WQActionRow(@"清理注入暂存", @"清理", WQSettingActionClearStaging),
+              WQDynamicRow(@"已保存注入路径", @"paths"),
+              WQActionRow(@"清除检测缓存", @"清除", WQSettingActionClearCache),
+              WQActionRow(@"打开备份", @"打开", WQSettingActionOpenBackups)],
             @[WQValueRow(@"外观", @"浅色"),
               WQValueRow(@"图标", @"线性"),
               WQValueRow(@"圆角", @"8 点"),
-              WQValueRow(@"间距档位", @"4 点")],
-            @[WQActionRow(@"重置设置", @"重置")],
+              WQValueRow(@"间距档位", @"4 点"),
+              WQSwitchRow(@"紧凑行高", WQSettingCompactRowsKey)],
+            @[WQSwitchRow(@"删除非空目录", WQSettingDeleteTreeKey),
+              WQValueRow(@"覆盖前保留副本", @"开启"),
+              WQValueRow(@"保存时校验版本", @"开启")],
+            @[WQActionRow(@"清空所有注入路径", @"清空", WQSettingActionClearPaths),
+              WQActionRow(@"重置全部设置", @"重置", WQSettingActionResetAll)],
         ];
     }
     return self;
@@ -1818,6 +1876,28 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
     self.tableView.backgroundColor = WQColorBackground();
     self.tableView.separatorColor = WQColorLine();
     self.navigationController.navigationBar.prefersLargeTitles = NO;
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    [self.tableView reloadData];
+}
+
+- (NSString *)dynamicValueForKey:(NSString *)key
+{
+    if ([key isEqualToString:@"mode"])
+        return wq_legacy_scope() ? @"兼容模式"
+            : (wq_system_areas_reachable() ? @"iOS 27 原生" : @"iOS 26 方式");
+    if ([key isEqualToString:@"reloadAge"]) return WQSettingReloadAgeText();
+    if ([key isEqualToString:@"staging"]) {
+        NSUInteger n = WQGameStagingFileCount();
+        return n ? [NSString stringWithFormat:@"%lu 个文件 · %@", (unsigned long)n,
+                                              wq_size_text(WQGameStagingBytes())] : @"无残留";
+    }
+    if ([key isEqualToString:@"paths"])
+        return [NSString stringWithFormat:@"%lu 条", (unsigned long)WQGameSavedPathCount()];
+    return @"—";
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return (NSInteger)_titles.count; }
@@ -1839,7 +1919,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return WQRowHeight;
+    return WQSettingGet(WQSettingCompactRowsKey, NO) ? 38.0 : WQRowHeight;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -1850,13 +1930,19 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
     cell.textLabel.text = row.title;
     cell.textLabel.font = WQFontBody();
     cell.textLabel.textColor = WQColorText();
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    cell.selectionStyle = row.tappable ? UITableViewCellSelectionStyleDefault
+                                       : UITableViewCellSelectionStyleNone;
     cell.backgroundColor = WQColorSurface();
     cell.detailTextLabel.text = nil;
     cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
     if (row.isSwitch) {
         UISwitch *control = [UISwitch new];
-        control.on = WQSettingBool(row.key, [row.key isEqualToString:WQSettingShowAllData]);
+        BOOL defaultsOn = [row.key isEqualToString:WQSettingShowAllDataKey] ||
+                          [row.key isEqualToString:WQSettingFastDirKey] ||
+                          [row.key isEqualToString:WQSettingParallelWriteKey] ||
+                          [row.key isEqualToString:WQSettingDetectCacheKey];
+        control.on = WQSettingBool(row.key, defaultsOn);
         control.onTintColor = WQColorStrong();
         control.tag = indexPath.section * 100 + indexPath.row;
         [control addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
@@ -1866,14 +1952,26 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
         [control setTitle:row.value forState:UIControlStateNormal];
         WQStylePrimaryButton(control);
         control.frame = CGRectMake(0, 0, 84, 32);
-        [control addTarget:self action:@selector(resetTapped) forControlEvents:UIControlEventTouchUpInside];
+        control.tag = (NSInteger)row.action;
+        [control addTarget:self action:@selector(actionTapped:) forControlEvents:UIControlEventTouchUpInside];
         cell.accessoryView = control;
     } else {
-        cell.detailTextLabel.text = row.value;
+        cell.detailTextLabel.text = row.key.length ? [self dynamicValueForKey:row.key] : row.value;
         cell.detailTextLabel.font = WQFontValue();
         cell.detailTextLabel.textColor = WQColorText2();
+        if (row.tappable) cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    WQSettingRow *row = _rows[indexPath.section][indexPath.row];
+    if (!row.tappable) return;
+    NSInteger idx = [NSUserDefaults.standardUserDefaults integerForKey:WQSettingReloadAgeIdxKey];
+    [NSUserDefaults.standardUserDefaults setInteger:(idx + 1) % 3 forKey:WQSettingReloadAgeIdxKey];
+    [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
 }
 
 - (void)switchChanged:(UISwitch *)sender
@@ -1886,24 +1984,93 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
     // The scope is read by the access layer immediately; the hidden entries go
     // away on the next appearance. Token flags cached earlier in this run need
     // a restart, which the group footer states.
-    if ([row.key isEqualToString:WQSettingLegacyScope]) wq_set_legacy_scope(sender.on);
+    if ([row.key isEqualToString:WQSettingLegacyScopeKey]) wq_set_legacy_scope(sender.on);
+    if ([row.key isEqualToString:WQSettingDetectCacheKey] && !sender.on) WQGameClearDetectionCache();
+    if ([row.key isEqualToString:WQSettingCompactRowsKey]) [self.tableView reloadData];
+    wq_log(@"settings: %@ = %d", row.key, sender.on ? 1 : 0);
 }
 
-- (void)resetTapped
+- (void)actionTapped:(UIButton *)sender
 {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"重置设置"
-        message:@"访问与文件操作开关将恢复默认值，不会改动任何备份。"
+    switch ((WQSettingAction)sender.tag) {
+        case WQSettingActionClearStaging:  [self clearStaging]; break;
+        case WQSettingActionClearCache:    [self clearCache]; break;
+        case WQSettingActionOpenBackups:   [self openBackups]; break;
+        case WQSettingActionClearPaths:    [self clearPaths]; break;
+        case WQSettingActionResetAll:      [self resetAll]; break;
+    }
+}
+
+- (void)clearStaging
+{
+    NSUInteger n = WQGameStagingFileCount();
+    if (!n) { wq_alert(self, @"无残留", @"注入暂存目录是空的。"); return; }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清理注入暂存"
+        message:[NSString stringWithFormat:@"将删除 %lu 个暂存文件（%@）。它们只是导入后的临时副本，不会改动已写入游戏目录的文件，也不会删除备份。",
+            (unsigned long)n, wq_size_text(WQGameStagingBytes())]
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"重置" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *__unused a) {
-        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        [defaults removeObjectForKey:WQSettingShowAllData];
-        [defaults removeObjectForKey:WQSettingDeleteTree];
-        [defaults removeObjectForKey:WQSettingLegacyScope];
-        wq_set_legacy_scope(NO);
-        [weakSelf.tableView reloadData];
-    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清理" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *__unused a) {
+            WQGameClearStaging();
+            [weakSelf.tableView reloadData];
+        }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)clearCache
+{
+    WQGameClearDetectionCache();
+    [WQContainerInfoCache() removeAllObjects];
+    [self.tableView reloadData];
+    wq_alert(self, @"已清除", @"应用检测与容器标识缓存已清空，下次进入会重新读取。");
+}
+
+- (void)openBackups
+{
+    [NSFileManager.defaultManager createDirectoryAtPath:wq_backup_root()
+                           withIntermediateDirectories:YES attributes:nil error:nil];
+    WQDirViewController *dir = [[WQDirViewController alloc] initWithPath:wq_backup_root() title:@"备份"];
+    [self.navigationController pushViewController:dir animated:YES];
+}
+
+- (void)clearPaths
+{
+    NSUInteger n = WQGameSavedPathCount();
+    if (!n) { wq_alert(self, @"没有记录", @"还没有保存任何注入路径。"); return; }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空所有注入路径？"
+        message:[NSString stringWithFormat:@"将移除 %lu 条记录。只影响本应用的快捷列表，不会删除游戏目录里的文件，也不会删除备份。此操作无法撤销。", (unsigned long)n]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *__unused a) {
+            WQGameClearSavedPaths();
+            [weakSelf.tableView reloadData];
+        }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)resetAll
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"重置全部设置"
+        message:@"全部开关恢复默认值，包含兼容模式、性能与界面选项。备份、注入暂存和已保存的注入路径都会保留。"
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"重置" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *__unused a) {
+            NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+            for (NSString *key in @[WQSettingShowAllDataKey, WQSettingDeleteTreeKey,
+                                    WQSettingLegacyScopeKey, WQSettingFastDirKey,
+                                    WQSettingParallelWriteKey, WQSettingDetectCacheKey,
+                                    WQSettingCompactRowsKey, WQSettingReloadAgeIdxKey])
+                [defaults removeObjectForKey:key];
+            wq_set_legacy_scope(NO);
+            WQGameClearDetectionCache();
+            [weakSelf.tableView reloadData];
+        }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -2039,7 +2206,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
 - (void)rebuildLocations
 {
     NSMutableArray<NSArray<NSString *> *> *locations = [NSMutableArray new];
-    if (WQSettingBool(WQSettingShowAllData, YES))
+    if (WQSettingBool(WQSettingShowAllDataKey, YES))
         [locations addObject:@[@"全部应用数据", @"/private/var/mobile/Containers/Data", @"folder"]];
     [locations addObjectsFromArray:@[
         @[@"应用数据", @"/private/var/mobile/Containers/Data/Application", @"square.grid.2x2"],
@@ -2146,13 +2313,14 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
         return @"iOS 26 上无法访问系统数据与系统组（仅 iOS 27 可用），内部守护进程需扫描全部文件编号：设备文件较多时首次可能耗时近一小时，之后只检查新增文件。若在 iOS 27.0 上出现入口打不开或长时间扫描，请在设置中开启兼容模式并重启。";
     if (section == 1)
         return @"被覆盖或删除的文件会先复制到备份（在文件 App 中也可查看）。长按备份可还原到原位置。";
-    return @"自动识别已安装游戏，进入数据根目录选择注入路径并保存，之后可快捷放入 pak、sig、lua 等资源文件。仅用于本机调试与补齐缺失资源。";
+    return @"点「进入」查看本机已安装应用，选择游戏容器与注入路径并保存，之后即可快捷放入 pak、sig、lua 等资源文件。仅用于本机调试与补齐缺失资源。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"r"]
         ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"r"];
+    cell.accessoryView = nil;
     UIListContentConfiguration *c = cell.defaultContentConfiguration;
     c.textProperties.color = WQColorText();
     c.secondaryTextProperties.color = WQColorText2();
@@ -2174,12 +2342,21 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
         c.text = tools[(NSUInteger)indexPath.row][0];
         c.image = WQLinearIcon(tools[(NSUInteger)indexPath.row][1]);
     } else {
-        c.text = @"游戏资源";
-        c.secondaryText = @"检测游戏 · 保存注入路径 · 放入资源文件";
+        c.text = @"游戏资源注入";
+        c.secondaryText = @"列出已安装应用 → 选择容器 → 保存路径 → 放入 pak / sig / lua";
+        c.secondaryTextProperties.numberOfLines = 2;
         c.image = WQLinearIcon(@"gamecontroller");
+        UILabel *enter = [UILabel new];
+        enter.text = @"进入";
+        enter.font = WQFontValue();
+        enter.textColor = WQColorText2();
+        enter.textAlignment = NSTextAlignmentRight;
+        [enter sizeToFit];
+        cell.accessoryView = enter;
     }
     cell.contentConfiguration = c;
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    cell.accessoryType = indexPath.section == 2 ? UITableViewCellAccessoryNone
+                                                : UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
 
@@ -2236,7 +2413,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
 {
     // Before any view controller can ask for a sandbox extension: apply the
     // saved compatibility mode so the very first grant uses its query flags.
-    wq_set_legacy_scope([NSUserDefaults.standardUserDefaults boolForKey:WQSettingLegacyScope]);
+    wq_set_legacy_scope([NSUserDefaults.standardUserDefaults boolForKey:WQSettingLegacyScopeKey]);
     UIWindow *window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     window.rootViewController = [[WQNavigationController alloc] initWithRootViewController:[WQRootViewController new]];
     [window makeKeyAndVisible];
