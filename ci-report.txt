@@ -1,5 +1,5 @@
-run_id=43754571567
-sdk=success tests=failure build=skipped
+run_id=43754680428
+sdk=success tests=success build=success
 --- xcode / sdk inventory ---
 == runner ==
 ProductName:		macOS
@@ -105,8 +105,8 @@ PASS: tree copy preserves symlink item without following it
 PASS: copied symlink remains a symlink
 
 == WQAppsCopyTests ==
-2026-11-15 19:49:52.509 WQAppsCopyTests[2334:10375] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-250A4C70-26C5-4183-B5C1-7A57F127341A/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-250A4C70-26C5-4183-B5C1-7A57F127341A/dst (3 items) OK
-2026-11-15 19:49:52.511 WQAppsCopyTests[2334:10375] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-250A4C70-26C5-4183-B5C1-7A57F127341A/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-250A4C70-26C5-4183-B5C1-7A57F127341A/empty-dst (0 items) OK
+2026-11-15 19:50:59.151 WQAppsCopyTests[2629:10751] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-066FBE71-6D4B-4FC1-B025-A62BC7A035C7/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-066FBE71-6D4B-4FC1-B025-A62BC7A035C7/dst (3 items) OK
+2026-11-15 19:50:59.152 WQAppsCopyTests[2629:10751] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-066FBE71-6D4B-4FC1-B025-A62BC7A035C7/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-066FBE71-6D4B-4FC1-B025-A62BC7A035C7/empty-dst (0 items) OK
 All Apps copy regression tests passed.
 
 == WQAppsSupportTests ==
@@ -126,14 +126,16 @@ All LaunchServices regression tests passed.
 == Python release and static UI checks ==
 
 ----------------------------------------------------------------------
-Ran 16 tests in 0.666s
+Ran 16 tests in 0.905s
 
 OK
 browser UI regression checks: PASS
 
 == Strict iOS arm64 syntax/link checks ==
-WQGameFeatures.m:478:9: error: dereferencing a __weak pointer is not allowed due to possible null value caused by race condition, assign it to strong variable first
-  478 |         weakSelf->_paths = all;
-      |         ^
-1 error generated.
+iOS syntax and link checks: PASS
+Info.plist: OK
+entitlements.plist: OK
+
+All requested regression suites passed. Logs retained in: /Users/runner/work/WQFiles-redesign/WQFiles-redesign/.work/tests/all.5jgXL4
 --- build (tail) ---
+wrote /Users/runner/work/WQFiles-redesign/WQFiles-redesign/WQFiles.ipa
