@@ -25,7 +25,7 @@
 #import "WQHexViewer.h"
 #import "WQSQLiteViewer.h"
 #import "WQDesignTokens.h"
-#import "WQLuaDeploy.h"
+#import "WQGameFeatures.h"
 
 // Settings keys and helpers are defined with the settings controllers below,
 // but the file browser calls them earlier, so declare them up front.
@@ -2126,26 +2126,27 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
     return footer;
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     // System Groups is the extra last row, on iOS 27 only.
-    return section == 0 ? (NSInteger)_locations.count + (wq_system_areas_reachable() ? 1 : 0) : 8;
+    if (section == 0) return (NSInteger)_locations.count + (wq_system_areas_reachable() ? 1 : 0);
+    return section == 1 ? 7 : 1;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    return section == 0 ? @"容器" : @"工具";
+    return @[@"容器", @"工具", @"游戏功能"][section];
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     if (section == 0 && !wq_system_areas_reachable())
         return @"iOS 26 上无法访问系统数据与系统组（仅 iOS 27 可用），内部守护进程需扫描全部文件编号：设备文件较多时首次可能耗时近一小时，之后只检查新增文件。若在 iOS 27.0 上出现入口打不开或长时间扫描，请在设置中开启兼容模式并重启。";
-    return section == 1
-        ? @"被覆盖或删除的文件会先复制到备份（在文件 App 中也可查看）。长按备份可还原到原位置。"
-        : nil;
+    if (section == 1)
+        return @"被覆盖或删除的文件会先复制到备份（在文件 App 中也可查看）。长按备份可还原到原位置。";
+    return @"自动识别已安装游戏，进入数据根目录选择注入路径并保存，之后可快捷放入 pak、sig、lua 等资源文件。仅用于本机调试与补齐缺失资源。";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -2154,6 +2155,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
         ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"r"];
     UIListContentConfiguration *c = cell.defaultContentConfiguration;
     c.textProperties.color = WQColorText();
+    c.secondaryTextProperties.color = WQColorText2();
     c.imageProperties.tintColor = WQColorText2();
     c.imageProperties.maximumSize = CGSizeMake(WQIconSize, WQIconSize);
     if (indexPath.section == 0) {
@@ -2165,13 +2167,16 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
             c.text = @"系统组";
             c.image = WQLinearIcon(@"lock.square.stack");
         }
-    } else {
+    } else if (indexPath.section == 1) {
         NSArray *tools = @[@[@"应用列表", @"square.grid.3x3"], @[@"缓存清理", @"trash"], @[@"前往路径…", @"arrow.right.circle"],
                            @[@"应用备份", @"clock.arrow.circlepath"], @[@"备份", @"clock.arrow.circlepath"], @[@"日志", @"doc.plaintext"],
-                           @[@"设置", @"slider.horizontal.3"],
-                           @[@"Lua 调试脚本", @"doc.badge.plus"]];
+                           @[@"设置", @"slider.horizontal.3"]];
         c.text = tools[(NSUInteger)indexPath.row][0];
         c.image = WQLinearIcon(tools[(NSUInteger)indexPath.row][1]);
+    } else {
+        c.text = @"游戏资源";
+        c.secondaryText = @"检测游戏 · 保存注入路径 · 放入资源文件";
+        c.image = WQLinearIcon(@"gamecontroller");
     }
     cell.contentConfiguration = c;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -2182,7 +2187,9 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     UIViewController *next = nil;
-    if (indexPath.section == 0) {
+    if (indexPath.section == 2) {
+        next = [WQGameCenterViewController new];
+    } else if (indexPath.section == 0) {
         if ((NSUInteger)indexPath.row < _locations.count) {
             NSArray *loc = _locations[(NSUInteger)indexPath.row];
             next = [[WQDirViewController alloc] initWithPath:loc[1] title:loc[0]];
@@ -2204,8 +2211,6 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
         next = [[WQDirViewController alloc] initWithPath:wq_backup_root() title:@"备份"];
     } else if (indexPath.row == 6) {
         next = [WQSettingsViewController new];
-    } else if (indexPath.row == 7) {
-        next = [WQLuaDeployViewController new];
     } else {
         next = [WQLogViewController new];
     }
