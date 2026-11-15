@@ -475,9 +475,11 @@ static CGFloat WQGameFormHeight(void)
         for (NSDictionary *item in [all copy])
             if ([item[@"id"] isEqualToString:identifier]) [all removeObject:item];
         WQGameSavePaths(all);
-        weakSelf->_paths = all;
-        [weakSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
-                          withRowAnimation:UITableViewRowAnimationAutomatic];
+        WQGameCenterViewController *s = weakSelf;
+        if (!s) return;
+        s->_paths = all;
+        [s.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
+                    withRowAnimation:UITableViewRowAnimationAutomatic];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
