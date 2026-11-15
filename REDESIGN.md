@@ -108,6 +108,36 @@ by 淮季
 公益频道@HeiMaoClub
 ```
 
+### 容器发现必须走官方链路（回归修复）
+
+一次「提速」把游戏检测的容器来源砍成 `wq_ls_container_paths(nil)` 和
+`wq_list(父目录)` 两条，结果冷启动直接进「游戏功能」时显示「未读取到应用容器」。原因：
+
+- iOS 27.0.1 上容器父目录**不给访问令牌**（README 原文），`wq_list` 必然返回 nil；
+- `wq_ls_container_paths(nil)` 依赖 `kWQLSStoreKey` 里记住的 LaunchServices
+  数据库路径，而该路径只有在首页的容器扫描／名称加载跑过后才写入
+  （`WQLaunchServices.m` 的 `wq_load_ls_names_locked`）。冷启动直进游戏页时它是空的；
+- 空结果又被缓存 5 分钟，连「重新检测」都看起来无效。
+
+现在 `WQGameDiscoverContainers` 按三级顺序取容器，且**空结果永不缓存**：
+
+1. `wq_display_names_reset_miss()` + `wq_load_display_names()` 主动查找并记住
+   LS 数据库，再读 `wq_ls_container_paths(nil)`（最快，通常秒出）；
+2. `wq_list(WQGameAppRoot)` 补充（在会给父目录令牌的构建上有效）；
+3. **`wq_enumerate(WQGameAppRoot, 0, ...)` 兜底**——这正是官方「应用列表」
+   （`WQApps.m`）用的入口，内部依次尝试容器管理器、LaunchServices API、
+   LS 数据库，最后才是带用户确认与进度窗口的全量 inode 扫描；它自带
+   10 分钟共享缓存与每周全量策略，不会重复慢扫。
+
+失败时页面给出实际来源（应用数据库／目录列举／容器扫描／扫描已取消）、
+「查看日志」与「手动填写容器 UUID」两个直达动作，而不是一行死状态。
+全量扫描确认弹窗也补齐了中文文案。
+
+另外，`wq_stat`（带授权重试）只用于创建目录与写入前的准确判断；「快速 stat」
+仅用于几百个容器里探测特征目录这种绝大多数路径本就不存在的场景，避免
+为每个不存在的 marker 申请沙箱令牌。目录列举同样区分「读不到」与「没有子目录」，
+前者会回退到标准列举。
+
 ### 性能优化（全局）
 
 - **快速目录列举**：`WQAccess` 新增 `wq_list_child_dirs`，一次 `opendir/readdir`

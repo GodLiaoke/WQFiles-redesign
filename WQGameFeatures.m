@@ -19,6 +19,11 @@ static NSString *const WQGameRiskNote =
     @"写入不是快照，游戏仍在运行可能损坏存档。同名文件会被替换，替换前在「备份」中保留副本。"
     @"改动游戏文件可能违反游戏条款或导致账号受限，请勿用于在线对局或影响他人。";
 
+// Defined in main.m and linked into the same binary; the log screen is shared
+// with the Tools section and is offered when container discovery fails.
+@interface WQLogViewController : UIViewController
+@end
+
 @interface WQGamePathPickerViewController : UITableViewController <UITextFieldDelegate>
 - (instancetype)initWithGame:(NSString *)game container:(NSString *)container
                     relative:(NSString *)relative suggest:(NSString *)suggest;
@@ -163,6 +168,17 @@ static BOOL WQGameStatFast(NSString *path, struct stat *st)
 static BOOL WQGameIsDir(NSString *path)
 {
     struct stat st;
+    if (wq_stat(path, &st)) return S_ISDIR(st.st_mode);
+    struct stat target;
+    return stat(path.fileSystemRepresentation, &target) == 0 && S_ISDIR(target.st_mode);
+}
+
+// Marker probing checks a folder inside every container. Most of those paths
+// do not exist, so a plain lstat (no sandbox grant) is the right fast answer.
+static BOOL WQGameHasExactMarker(NSString *container)
+{
+    struct stat st;
+    NSString *path = [container stringByAppendingPathComponent:WQGameExactMark];
     if (WQGameStatFast(path, &st)) return S_ISDIR(st.st_mode);
     struct stat target;
     return stat(path.fileSystemRepresentation, &target) == 0 && S_ISDIR(target.st_mode);
@@ -178,7 +194,7 @@ static NSString *_Nullable WQGameEnsureChain(NSString *container, NSString *rel,
         if (!part.length) continue;
         current = [current stringByAppendingPathComponent:part];
         struct stat st;
-        if (WQGameStatFast(current, &st)) {
+        if (wq_stat(current, &st)) {
             if (!S_ISDIR(st.st_mode)) {
                 if (errorText) *errorText = [NSString stringWithFormat:@"%@ 已存在但不是目录", part];
                 return nil;
@@ -195,34 +211,68 @@ static NSString *_Nullable WQGameEnsureChain(NSString *container, NSString *rel,
     return current;
 }
 
-// Detect once and reuse. The slow part is resolving identifiers for hundreds
-// of containers; asking the LaunchServices database first avoids a sandbox
-// grant per container, and the result is cached for five minutes.
+// Detect once and reuse. Container discovery MUST follow the same chain as
+// the official Apps screen: on iOS 27.0.1 the parent folder gives no token,
+// so wq_list() returns nil, and wq_ls_container_paths(nil) returns nil until
+// the LaunchServices store path has been remembered. wq_enumerate owns the
+// real fallback (container manager -> LaunchServices API -> store -> full
+// inode scan with user confirmation, shared 10-minute cache and weekly full
+// scan). Do not "optimize" that fallback away again.
+static NSArray<NSString *> *WQGameDiscoverContainers(NSString *_Nullable *_Nullable sourceOut)
+{
+    NSMutableArray<NSString *> *out = [NSMutableArray new];
+    void (^add)(NSString *) = ^(NSString *raw) {
+        NSString *full = [raw hasPrefix:@"/"] ? raw
+            : [WQGameAppRoot stringByAppendingPathComponent:raw];
+        if (![full containsString:@"/Containers/Data/Application/"]) return;
+        if (![out containsObject:full]) [out addObject:full];
+    };
+
+    // Step 1: find and remember the LaunchServices database. This is what the
+    // home screen normally does before any app list is shown. Without it a
+    // cold start straight into this page always sees an empty store hint.
+    wq_display_names_reset_miss();
+    wq_load_display_names();
+    for (NSString *p in wq_ls_container_paths(nil) ?: @[]) add(p);
+    if (out.count) { if (sourceOut) *sourceOut = @"应用数据库"; return out; }
+
+    // Step 2: a plain listing, when the build does hand out a parent token.
+    for (NSString *name in wq_list(WQGameAppRoot, nil) ?: @[]) add(name);
+    if (out.count) { if (sourceOut) *sourceOut = @"目录列举"; return out; }
+
+    // Step 3: the official fallback. A non-nil progress block gives the scan
+    // foreground priority; the global full-scan confirmation and progress
+    // window (wq_set_full_scan_ui) still appear when an inode scan is needed.
+    NSArray<NSString *> *enumerated = wq_enumerate(WQGameAppRoot, 0, nil,
+        ^(int64_t __unused done, int64_t __unused total, NSUInteger __unused found) {});
+    for (NSString *p in enumerated ?: @[]) add(p);
+    if (out.count) { if (sourceOut) *sourceOut = @"容器扫描"; return out; }
+
+    if (sourceOut) *sourceOut = wq_full_scan_was_declined() ? @"扫描已取消" : @"未找到";
+    return out;
+}
+
 static NSArray<NSDictionary *> *_Nullable gWQAppCache;
 static NSTimeInterval gWQAppCacheTime;
-static NSArray<NSDictionary *> *WQGameScanApps(BOOL force)
+static NSString *_Nullable gWQAppCacheSource;
+
+static NSArray<NSDictionary *> *WQGameScanApps(BOOL force, NSString *_Nullable *_Nullable sourceOut)
 {
     BOOL cacheOn = WQSettingGet(WQSettingDetectCacheKey, YES);
     @synchronized (WQGameCenterViewController.class) {
-        if (!force && cacheOn && gWQAppCache && (CFAbsoluteTimeGetCurrent() - gWQAppCacheTime) < 300.0)
+        if (!force && cacheOn && gWQAppCache.count &&
+            (CFAbsoluteTimeGetCurrent() - gWQAppCacheTime) < 300.0) {
+            if (sourceOut) *sourceOut = gWQAppCacheSource ?: @"缓存";
             return gWQAppCache;
+        }
     }
-    NSMutableArray<NSString *> *candidates = [NSMutableArray new];
-    for (NSString *p in wq_ls_container_paths(nil) ?: @[]) {
-        NSString *full = [p hasPrefix:@"/"] ? p : [WQGameAppRoot stringByAppendingPathComponent:p];
-        if (![full containsString:@"/Containers/Data/Application/"]) continue;
-        if (![candidates containsObject:full]) [candidates addObject:full];
-    }
-    for (NSString *name in wq_list(WQGameAppRoot, nil) ?: @[]) {
-        NSString *full = [WQGameAppRoot stringByAppendingPathComponent:name];
-        if (![candidates containsObject:full]) [candidates addObject:full];
-    }
-
+    NSString *source = nil;
+    NSArray<NSString *> *candidates = WQGameDiscoverContainers(&source);
     NSMutableArray<NSDictionary *> *apps = [NSMutableArray new];
     for (NSString *dir in candidates) {
         NSString *bid = (wq_bundle_id_for_container(dir) ?: wq_container_label(dir) ?: @"").lowercaseString;
         NSString *name = wq_display_name(bid) ?: (bid.length ? bid : dir.lastPathComponent);
-        BOOL exact = WQGameIsDir([dir stringByAppendingPathComponent:WQGameExactMark]);
+        BOOL exact = WQGameHasExactMarker(dir);
         NSString *game = exact ? WQGameExactName : @"";
         if (!exact) {
             for (NSDictionary *p in WQGameProfiles())
@@ -238,10 +288,15 @@ static NSArray<NSDictionary *> *WQGameScanApps(BOOL force)
         [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES
                                       selector:@selector(localizedCaseInsensitiveCompare:)],
     ]];
+    // Never cache an empty result: a cold-start failure used to stick for five
+    // minutes and made "重新检测" look broken.
     @synchronized (WQGameCenterViewController.class) {
-        gWQAppCache = cacheOn ? apps : nil;
+        gWQAppCache = (cacheOn && apps.count) ? apps : nil;
+        gWQAppCacheSource = source;
         gWQAppCacheTime = CFAbsoluteTimeGetCurrent();
     }
+    if (sourceOut) *sourceOut = source ?: @"未找到";
+    wq_log(@"game: %lu containers via %@", (unsigned long)candidates.count, source ?: @"未找到");
     return apps;
 }
 
@@ -249,6 +304,7 @@ void WQGameClearDetectionCache(void)
 {
     @synchronized (WQGameCenterViewController.class) {
         gWQAppCache = nil;
+        gWQAppCacheSource = nil;
         gWQAppCacheTime = 0;
     }
     wq_log(@"game: detection cache cleared");
@@ -418,6 +474,7 @@ static UIView *WQGameCreditFooter(void)
     NSArray<NSDictionary *> *_paths;
     BOOL _detecting;
     BOOL _showAllApps;
+    NSString *_statusText;
 }
 
 - (void)viewDidLoad
@@ -448,15 +505,17 @@ static UIView *WQGameCreditFooter(void)
     _apps = @[];
     [self.tableView reloadData];
     __weak typeof(self) weakSelf = self;
+    _statusText = @"正在查找应用容器…";
     dispatch_async(wq_io(), ^{
-        NSArray *found = WQGameScanApps(YES);
+        NSString *source = nil;
+        NSArray *found = WQGameScanApps(YES, &source);
         dispatch_async(dispatch_get_main_queue(), ^{
             WQGameCenterViewController *s = weakSelf;
             if (!s) return;
             s->_detecting = NO;
             s->_apps = found;
+            s->_statusText = source;
             [s.tableView reloadData];
-            wq_log(@"game: listed %lu app containers", (unsigned long)found.count);
         });
     });
 }
@@ -464,7 +523,11 @@ static UIView *WQGameCreditFooter(void)
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    if (section == 0) return (NSInteger)MAX(_apps.count, (NSUInteger)1) + (_apps.count > 3 && !_showAllApps ? 1 : 0);
+    if (section == 0) {
+        NSInteger base = (NSInteger)MAX(_apps.count, (NSUInteger)1);
+        if (!_apps.count && !_detecting) base += 2;   // 查看日志 / 手动填写
+        return base + (_apps.count > 3 && !_showAllApps ? 1 : 0);
+    }
     return (NSInteger)_paths.count + 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
@@ -496,12 +559,19 @@ static UIView *WQGameCreditFooter(void)
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else if (!_apps.count) {
             cell.textLabel.text = @"未读取到应用容器";
-            cell.detailTextLabel.text = @"可在下方手动添加路径，或点右上角重新检测";
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"来源：%@ · 点右上角重新检测，或先看日志确认原因",
+                                         _statusText ?: @"未找到"];
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else if (moreRow) {
             cell.textLabel.text = [NSString stringWithFormat:@"显示全部 %lu 个应用", (unsigned long)_apps.count];
             cell.detailTextLabel.text = @"默认只显示前 3 个，其余按需要展开";
             cell.imageView.image = WQLinearIcon(@"chevron.down");
+        } else if (!_apps.count && (idx == 1 || idx == 2)) {
+            cell.textLabel.text = idx == 1 ? @"查看日志" : @"手动填写容器 UUID";
+            cell.detailTextLabel.text = idx == 1 ? @"看是 No App Group、NO TOKEN 还是扫描被取消"
+                                                 : @"不依赖检测结果，直接填写已知容器路径";
+            cell.imageView.image = WQLinearIcon(idx == 1 ? @"doc.plaintext" : @"square.and.pencil");
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else {
             NSDictionary *a = _apps[idx];
             BOOL exact = [a[@"exact"] boolValue];
@@ -569,7 +639,12 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 0) {
         NSUInteger idx = (NSUInteger)indexPath.row;
-        if (_detecting || !_apps.count) return;
+        if (_detecting) return;
+        if (!_apps.count) {
+            if (idx == 1) [self.navigationController pushViewController:[WQLogViewController new] animated:YES];
+            else if (idx == 2) [self.navigationController pushViewController:[WQGameAddPathViewController new] animated:YES];
+            return;
+        }
         if (_apps.count > 3 && !_showAllApps && idx == _apps.count) {
             _showAllApps = YES;
             [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
@@ -730,10 +805,8 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
     BOOL fast = WQSettingGet(WQSettingFastDirKey, YES);
     __weak typeof(self) weakSelf = self;
     dispatch_async(wq_io(), ^{
-        NSArray<NSString *> *dirs;
-        if (fast) {
-            dirs = wq_list_child_dirs(path, nil) ?: @[];
-        } else {
+        NSArray<NSString *> *dirs = fast ? wq_list_child_dirs(path, nil) : nil;
+        if (!dirs) {   // nil = unreadable; fall back, never pretend it is empty
             NSMutableArray<NSString *> *collected = [NSMutableArray new];
             for (NSString *n in wq_list(path, nil) ?: @[])
                 if (WQGameIsDir([path stringByAppendingPathComponent:n])) [collected addObject:n];
@@ -933,7 +1006,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
     [self.view endEditing:YES];
     __weak typeof(self) weakSelf = self;
     dispatch_async(wq_io(), ^{
-        NSArray *found = WQGameScanApps(NO);
+        NSArray *found = WQGameScanApps(YES, NULL);
         dispatch_async(dispatch_get_main_queue(), ^{
             WQGameAddPathViewController *s = weakSelf;
             if (!s) return;
@@ -1204,7 +1277,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             NSDictionary *f = files[i];
             NSString *dest = [target stringByAppendingPathComponent:f[@"name"]];
             struct stat st;
-            BOOL exists = WQGameStatFast(dest, &st) && S_ISREG(st.st_mode);
+            BOOL exists = wq_stat(dest, &st) && S_ISREG(st.st_mode);
             NSString *err = nil;
             BOOL ok = exists ? wq_write_from_file(dest, f[@"local"], &err)
                              : wq_create_file_from(dest, f[@"local"], &err);
@@ -1213,7 +1286,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             else {
                 struct stat after;
                 unsigned long long want = [f[@"size"] unsignedLongLongValue];
-                if (!WQGameStatFast(dest, &after) || !S_ISREG(after.st_mode) || (unsigned long long)after.st_size != want)
+                if (!wq_stat(dest, &after) || !S_ISREG(after.st_mode) || (unsigned long long)after.st_size != want)
                     failure = @"写入后校验不一致";
             }
             NSDictionary *r = failure ? @{@"name": f[@"name"], @"error": failure}

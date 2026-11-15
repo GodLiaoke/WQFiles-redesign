@@ -2558,15 +2558,15 @@ static BOOL wq_confirm_full_scan(NSString *what, int64_t ids, double seconds)
         UIViewController *top = wq_top_view_controller();
         if (!top) { dispatch_semaphore_signal(answered); return; }   // not in front: don't scan unasked
         NSString *message = [NSString stringWithFormat:
-            @"To list %@, WQ Files has to check every file on this device once: %@ files, %@.\n\n"
-            @"This is only needed the first time; later scans only check new files and take seconds.\n\n"
-            @"Keep WQ Files open while it scans.", what, wq_count_text(ids), wq_duration_text(seconds)];
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Scan all files?" message:message
+            @"要列出%@，WQ Files 需要对本机全部文件编号检查一次：%@ 个文件，%@。\n\n"
+            @"只有首次需要这样；之后只检查新增文件，几秒即可完成。\n\n"
+            @"扫描期间请保持 WQ Files 在前台。", what, wq_count_text(ids), wq_duration_text(seconds)];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"扫描全部文件？" message:message
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"稍后" style:UIAlertActionStyleCancel handler:^(UIAlertAction *__unused a) {
             dispatch_semaphore_signal(answered);
         }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Start Scan" style:UIAlertActionStyleDefault handler:^(UIAlertAction *__unused a) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"开始扫描" style:UIAlertActionStyleDefault handler:^(UIAlertAction *__unused a) {
             start = YES;
             // A little extra time when the user switches away (iOS grants about 30 s).
             if (gScanBackgroundTask == UIBackgroundTaskInvalid) {
