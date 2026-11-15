@@ -464,14 +464,117 @@ static UIView *WQGameCreditFooter(void)
     return v;
 }
 
+#pragma mark - Search helpers
+
+// How many app containers the list shows before the user expands it. Searching
+// always sees the complete result set, never just the preview.
+static NSUInteger const WQGamePreviewCount = 5;
+
+// Whitespace-separated terms are ANDed, so "com.tencent delta" narrows the
+// list instead of matching everything. Ranks: exact field == 0, prefix == 1,
+// substring == 2. Exact hits sort first, which is what "精确搜索" means here.
+static NSArray<NSString *> *WQGameQueryTokens(NSString *text)
+{
+    NSMutableArray<NSString *> *out = [NSMutableArray new];
+    for (NSString *part in [text componentsSeparatedByCharactersInSet:
+                            NSCharacterSet.whitespaceAndNewlineCharacterSet]) {
+        NSString *token = [part stringByTrimmingCharactersInSet:
+                           NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
+        if (token.length) [out addObject:token];
+    }
+    return out;
+}
+
+static NSArray<NSString *> *WQGameAppFields(NSDictionary *app)
+{
+    NSString *path = app[@"path"] ?: @"";
+    return @[app[@"name"] ?: @"", app[@"game"] ?: @"", app[@"bid"] ?: @"",
+             path.lastPathComponent ?: @"", path,
+             [app[@"exact"] boolValue] ? @"三角洲行动 已验证路径" : @""];
+}
+
+static NSArray<NSString *> *WQGamePathFields(NSDictionary *entry)
+{
+    return @[entry[@"alias"] ?: @"", entry[@"game"] ?: @"",
+             entry[@"relative"] ?: @"", entry[@"container"] ?: @"",
+             WQGameFullPath(entry)];
+}
+
+static NSInteger WQGameMatchRank(NSArray<NSString *> *fields, NSArray<NSString *> *tokens)
+{
+    NSInteger total = 0;
+    for (NSString *token in tokens) {
+        NSInteger best = 3;   // 3 = this term matched nothing
+        for (NSString *raw in fields) {
+            NSString *f = raw.lowercaseString;
+            if (!f.length) continue;
+            if ([f isEqualToString:token]) { best = 0; break; }
+            if ([f hasPrefix:token]) best = MIN(best, 1);
+            else if ([f rangeOfString:token].location != NSNotFound) best = MIN(best, 2);
+        }
+        if (best == 3) return -1;
+        total += best;
+    }
+    return total;
+}
+
+// Ranked, stable sort of arbitrary item dictionaries by rank then name.
+static NSArray<NSDictionary *> *WQGameRanked(NSArray<NSDictionary *> *items,
+                                             NSArray<NSString *> *tokens,
+                                             NSArray<NSString *> * (^fields)(NSDictionary *),
+                                             NSString *nameKey)
+{
+    NSMutableArray<NSDictionary *> *ranked = [NSMutableArray new];
+    for (NSDictionary *item in items) {
+        NSInteger rank = WQGameMatchRank(fields(item), tokens);
+        if (rank >= 0) [ranked addObject:@{@"item": item, @"rank": @(rank)}];
+    }
+    [ranked sortUsingDescriptors:@[
+        [NSSortDescriptor sortDescriptorWithKey:@"rank" ascending:YES],
+        [NSSortDescriptor sortDescriptorWithKey:[@"item." stringByAppendingString:nameKey]
+                                      ascending:YES
+                                       selector:@selector(localizedCaseInsensitiveCompare:)],
+    ]];
+    return [ranked valueForKey:@"item"] ?: @[];
+}
+
+// Bold-only emphasis: same neutral text colour, no highlight fill or accent.
+// It keeps the design language while making the matched terms scannable.
+static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> *tokens,
+                            UIFont *font, UIColor *color)
+{
+    label.text = text;
+    if (!tokens.count || !text.length) return;
+    NSMutableAttributedString *a = [[NSMutableAttributedString alloc]
+        initWithString:text attributes:@{NSFontAttributeName: font,
+                                         NSForegroundColorAttributeName: color}];
+    UIFontDescriptor *descriptor = [font.fontDescriptor fontDescriptorWithSymbolicTraits:UIFontDescriptorTraitBold];
+    UIFont *bold = descriptor ? [UIFont fontWithDescriptor:descriptor size:0] : font;
+    for (NSString *token in tokens) {
+        NSRange remaining = NSMakeRange(0, text.length);
+        while (remaining.location < text.length) {
+            NSRange hit = [text rangeOfString:token options:NSCaseInsensitiveSearch range:remaining];
+            if (hit.location == NSNotFound) break;
+            [a addAttribute:NSFontAttributeName value:bold range:hit];
+            NSUInteger next = NSMaxRange(hit);
+            remaining = NSMakeRange(next, text.length - next);
+        }
+    }
+    label.attributedText = a;
+}
+
 #pragma mark - Game centre
 
-@interface WQGameCenterViewController ()
+@interface WQGameCenterViewController () <UISearchResultsUpdating>
 @end
 
 @implementation WQGameCenterViewController {
-    NSArray<NSDictionary *> *_apps;
-    NSArray<NSDictionary *> *_paths;
+    NSArray<NSDictionary *> *_apps;          // full detection result
+    NSArray<NSDictionary *> *_paths;         // all saved entries
+    NSArray<NSDictionary *> *_visibleApps;   // filtered, or the preview slice
+    NSArray<NSDictionary *> *_visiblePaths;
+    NSArray<NSString *> *_queryTokens;
+    BOOL _searching;
     BOOL _detecting;
     BOOL _showAllApps;
     NSString *_statusText;
@@ -485,10 +588,28 @@ static UIView *WQGameCreditFooter(void)
     self.tableView.backgroundColor = WQColorBackground();
     self.tableView.separatorColor = WQColorLine();
     self.tableView.tableFooterView = WQGameCreditFooter();
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"重新检测" style:UIBarButtonItemStylePlain
                                         target:self action:@selector(redetect)];
+
+    UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
+    search.searchResultsUpdater = self;
+    search.obscuresBackgroundDuringPresentation = NO;
+    search.searchBar.placeholder = @"搜索应用名 / 标识 / 容器 UUID";
+    search.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    search.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
+    search.searchBar.spellCheckingType = UITextSpellCheckingTypeNo;
+    search.searchBar.returnKeyType = UIReturnKeyDone;
+    self.navigationItem.searchController = search;
+    self.navigationItem.hidesSearchBarWhenScrolling = NO;   // always visible
+    self.definesPresentationContext = YES;
+
+    _visibleApps = @[];
+    _visiblePaths = @[];
+    _queryTokens = @[];
     _paths = WQGameLoadPaths();
+    [self recomputeVisible];
     [self redetect];
 }
 
@@ -496,6 +617,39 @@ static UIView *WQGameCreditFooter(void)
 {
     [super viewWillAppear:animated];
     _paths = WQGameLoadPaths();
+    [self recomputeVisible];
+    [self.tableView reloadData];
+}
+
+// Single source of truth for what the table shows. Every mutation of _apps or
+// _paths goes through here, so cell indexes, menus and actions can never read
+// a stale or differently-filtered array.
+- (void)recomputeVisible
+{
+    BOOL searching = _queryTokens.count > 0;
+    _searching = searching;
+    if (searching) {
+        _visibleApps = WQGameRanked(_apps ?: @[], _queryTokens,
+            ^NSArray<NSString *> *(NSDictionary *app) { return WQGameAppFields(app); }, @"name");
+        _visiblePaths = WQGameRanked(_paths ?: @[], _queryTokens,
+            ^NSArray<NSString *> *(NSDictionary *p) { return WQGamePathFields(p); }, @"alias");
+    } else {
+        NSUInteger limit = _showAllApps ? (_apps ?: @[]).count
+                                        : MIN((_apps ?: @[]).count, WQGamePreviewCount);
+        _visibleApps = [(_apps ?: @[]) subarrayWithRange:NSMakeRange(0, limit)];
+        _visiblePaths = _paths ?: @[];
+    }
+}
+
+- (BOOL)hasMoreRow
+{
+    return !_searching && !_showAllApps && _apps.count > WQGamePreviewCount;
+}
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController
+{
+    _queryTokens = WQGameQueryTokens(searchController.searchBar.text ?: @"");
+    [self recomputeVisible];
     [self.tableView reloadData];
 }
 
@@ -503,9 +657,10 @@ static UIView *WQGameCreditFooter(void)
 {
     _detecting = YES;
     _apps = @[];
+    _statusText = @"正在查找应用容器…";
+    [self recomputeVisible];
     [self.tableView reloadData];
     __weak typeof(self) weakSelf = self;
-    _statusText = @"正在查找应用容器…";
     dispatch_async(wq_io(), ^{
         NSString *source = nil;
         NSArray *found = WQGameScanApps(YES, &source);
@@ -515,31 +670,50 @@ static UIView *WQGameCreditFooter(void)
             s->_detecting = NO;
             s->_apps = found;
             s->_statusText = source;
+            [s recomputeVisible];
             [s.tableView reloadData];
         });
     });
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    if (section == 0) {
-        NSInteger base = (NSInteger)MAX(_apps.count, (NSUInteger)1);
-        if (!_apps.count && !_detecting) base += 2;   // 查看日志 / 手动填写
-        return base + (_apps.count > 3 && !_showAllApps ? 1 : 0);
-    }
-    return (NSInteger)_paths.count + 1;
+    if (section == 1) return (NSInteger)_visiblePaths.count + 1;   // + add-path row
+    if (_detecting) return 1;
+    if (!_apps.count) return 3;   // status + 查看日志 + 手动填写
+    if (_searching && !_visibleApps.count) return 1;   // no-match row
+    return (NSInteger)_visibleApps.count + ([self hasMoreRow] ? 1 : 0);
 }
+
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    return section == 0 ? @"已安装应用 · 选择容器" : @"保存的注入路径";
+    if (section == 0) {
+        if (_searching && !_detecting && _apps.count)
+            return [NSString stringWithFormat:@"已安装应用 · %lu 项匹配", (unsigned long)_visibleApps.count];
+        return @"已安装应用 · 选择容器";
+    }
+    if (_searching)
+        return [NSString stringWithFormat:@"保存的注入路径 · %lu 项", (unsigned long)_visiblePaths.count];
+    return @"保存的注入路径";
 }
+
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
-    if (section == 0)
-        return @"三角洲行动按已验证的特征目录识别，可一键部署默认目录链。其余游戏只按应用标识排序推荐，不猜测资源目录；显示的是真实标识，请点按确认后再选择路径。长按任意行可复制容器路径。";
-    return @"点按快捷放入资源文件，长按可复制完整路径；左滑只删除本应用的记录，不删除游戏里的文件。";
+    if (section == 0) {
+        NSString *count = _detecting ? @"正在检测…" :
+            (_searching
+                ? [NSString stringWithFormat:@"共 %lu 个应用 · %lu 项匹配",
+                    (unsigned long)_apps.count, (unsigned long)_visibleApps.count]
+                : [NSString stringWithFormat:@"共 %lu 个应用 · 默认显示前 %lu 个",
+                    (unsigned long)_apps.count, (unsigned long)WQGamePreviewCount]);
+        NSString *how = @"搜索支持名称、应用标识、容器 UUID 与完整路径；多个关键词用空格分隔，完全相等的结果排最前。搜索时不限 5 个，点「显示全部」可展开完整列表。";
+        return [NSString stringWithFormat:@"%@。%@\n\n三角洲行动按已验证的特征目录识别；其余游戏只按应用标识排序推荐，不猜测资源目录。长按任意行可复制容器路径。", count, how];
+    }
+    return @"搜索会同时过滤已保存路径。点按快捷放入资源文件，长按可复制完整路径；左滑只删除本应用的记录，不删除游戏里的文件。";
 }
+
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     return WQGameRowH();
@@ -550,37 +724,48 @@ static UIView *WQGameCreditFooter(void)
     UITableViewCell *cell = WQGamePlainCell();
     cell.accessoryType = UITableViewCellAccessoryNone;
     cell.accessoryView = nil;
+    NSArray<NSString *> *tokens = _queryTokens;
+
     if (indexPath.section == 0) {
         NSUInteger idx = (NSUInteger)indexPath.row;
-        BOOL moreRow = _apps.count > 3 && !_showAllApps && idx == _apps.count;
         if (_detecting) {
             cell.textLabel.text = @"正在读取已安装应用…";
             cell.detailTextLabel.text = @"首次读取名称数据库需要几秒";
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else if (!_apps.count) {
-            cell.textLabel.text = @"未读取到应用容器";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"来源：%@ · 点右上角重新检测，或先看日志确认原因",
-                                         _statusText ?: @"未找到"];
+            if (idx == 0) {
+                cell.textLabel.text = @"未读取到应用容器";
+                cell.detailTextLabel.text = [NSString stringWithFormat:@"来源：%@ · 点右上角重新检测，或先看日志确认原因",
+                                             _statusText ?: @"未找到"];
+                cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            } else {
+                cell.textLabel.text = idx == 1 ? @"查看日志" : @"手动填写容器 UUID";
+                cell.detailTextLabel.text = idx == 1 ? @"看是 No App Group、NO TOKEN 还是扫描被取消"
+                                                     : @"不依赖检测结果，直接填写已知容器路径";
+                cell.imageView.image = WQLinearIcon(idx == 1 ? @"doc.plaintext" : @"square.and.pencil");
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            }
+        } else if (_searching && !_visibleApps.count) {
+            cell.textLabel.text = @"没有匹配的应用";
+            cell.detailTextLabel.text = @"换个关键词，或用下方「添加自定义路径」手动指定";
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else if (moreRow) {
+        } else if ([self hasMoreRow] && idx == _visibleApps.count) {
             cell.textLabel.text = [NSString stringWithFormat:@"显示全部 %lu 个应用", (unsigned long)_apps.count];
-            cell.detailTextLabel.text = @"默认只显示前 3 个，其余按需要展开";
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"当前显示前 %lu 个，也可直接用搜索精确定位",
+                                         (unsigned long)WQGamePreviewCount];
             cell.imageView.image = WQLinearIcon(@"chevron.down");
-        } else if (!_apps.count && (idx == 1 || idx == 2)) {
-            cell.textLabel.text = idx == 1 ? @"查看日志" : @"手动填写容器 UUID";
-            cell.detailTextLabel.text = idx == 1 ? @"看是 No App Group、NO TOKEN 还是扫描被取消"
-                                                 : @"不依赖检测结果，直接填写已知容器路径";
-            cell.imageView.image = WQLinearIcon(idx == 1 ? @"doc.plaintext" : @"square.and.pencil");
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else {
-            NSDictionary *a = _apps[idx];
+            NSDictionary *a = _visibleApps[idx];
             BOOL exact = [a[@"exact"] boolValue];
-            cell.textLabel.text = exact ? [NSString stringWithFormat:@"%@ · 已验证路径", a[@"name"]]
-                                        : (a[@"game"] ?: a[@"name"]);
+            NSString *title = exact ? [NSString stringWithFormat:@"%@ · 已验证路径", a[@"name"]]
+                                    : ([(NSString *)a[@"game"] length] ? a[@"game"] : a[@"name"]);
             NSString *bid = a[@"bid"];
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@",
+            NSString *subtitle = [NSString stringWithFormat:@"%@ · %@",
                 bid.length ? bid : @"标识未知",
-                exact ? @"Documents/DeltaForce/Saved" : (a[@"game"] ? @"标识匹配，仅供参考" : a[@"name"])];
+                exact ? @"Documents/DeltaForce/Saved" :
+                    ([(NSString *)a[@"game"] length] ? @"标识匹配，仅供参考" : a[@"name"])];
+            WQGameEmphasize(cell.textLabel, title, tokens, WQFontBody(), WQColorText());
+            WQGameEmphasize(cell.detailTextLabel, subtitle, tokens, WQFontCaption(), WQColorText2());
             cell.imageView.image = WQLinearIcon(exact ? @"checkmark.square" : @"app.dashed");
             if (exact) {
                 UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -597,15 +782,17 @@ static UIView *WQGameCreditFooter(void)
         }
     } else {
         NSUInteger idx = (NSUInteger)indexPath.row;
-        if (idx < _paths.count) {
-            NSDictionary *p = _paths[idx];
-            cell.textLabel.text = p[@"alias"];
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@", p[@"game"], p[@"relative"]];
+        if (idx < _visiblePaths.count) {
+            NSDictionary *p = _visiblePaths[idx];
+            NSString *title = p[@"alias"];
+            NSString *subtitle = [NSString stringWithFormat:@"%@ · %@", p[@"game"], p[@"relative"]];
+            WQGameEmphasize(cell.textLabel, title, tokens, WQFontBody(), WQColorText());
+            WQGameEmphasize(cell.detailTextLabel, subtitle, tokens, WQFontCaption(), WQColorText2());
             cell.imageView.image = WQLinearIcon(@"folder");
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         } else {
             cell.textLabel.text = @"添加自定义路径";
-            cell.detailTextLabel.text = @"手动填写容器 UUID 与相对路径";
+            cell.detailTextLabel.text = @"手动填写容器 UUID 与相对路径，不依赖检测";
             cell.imageView.image = WQLinearIcon(@"plus");
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
@@ -617,18 +804,18 @@ static UIView *WQGameCreditFooter(void)
 contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point
 {
     NSString *path = nil;
-    if (indexPath.section == 0 && (NSUInteger)indexPath.row < _apps.count)
-        path = _apps[(NSUInteger)indexPath.row][@"path"];
-    else if (indexPath.section == 1 && (NSUInteger)indexPath.row < _paths.count)
-        path = WQGameFullPath(_paths[(NSUInteger)indexPath.row]);
+    if (indexPath.section == 0 && (NSUInteger)indexPath.row < _visibleApps.count)
+        path = _visibleApps[(NSUInteger)indexPath.row][@"path"];
+    else if (indexPath.section == 1 && (NSUInteger)indexPath.row < _visiblePaths.count)
+        path = WQGameFullPath(_visiblePaths[(NSUInteger)indexPath.row]);
     if (!path) return nil;
     __weak typeof(self) weakSelf = self;
     return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil
         actionProvider:^UIMenu *(NSArray<UIMenuElement *> * __unused suggested) {
             UIAction *copy = [UIAction actionWithTitle:@"复制完整路径" image:[UIImage systemImageNamed:@"doc.on.doc"]
                 identifier:nil handler:^(UIAction *__unused a) {
-                    WQGameCenterViewController *s = weakSelf;
-                    if (s) WQGameCopyPath(s, path);
+                    WQGameCenterViewController *vc = weakSelf;
+                    if (vc) WQGameCopyPath(vc, path);
                 }];
             return [UIMenu menuWithTitle:@"" children:@[copy]];
         }];
@@ -645,32 +832,40 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
             else if (idx == 2) [self.navigationController pushViewController:[WQGameAddPathViewController new] animated:YES];
             return;
         }
-        if (_apps.count > 3 && !_showAllApps && idx == _apps.count) {
+        if (_searching && !_visibleApps.count) return;
+        if ([self hasMoreRow] && idx == _visibleApps.count) {
             _showAllApps = YES;
+            [self recomputeVisible];
             [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
                           withRowAnimation:UITableViewRowAnimationAutomatic];
             return;
         }
-        if (idx >= _apps.count) return;
-        NSDictionary *a = _apps[idx];
-        NSString *suggest = [a[@"exact"] boolValue] ? WQGameExactChain : @"Documents";
+        if (idx >= _visibleApps.count) return;
+        [self.view endEditing:YES];   // dismiss the keyboard before pushing
+        NSDictionary *a = _visibleApps[idx];
+        BOOL exact = [a[@"exact"] boolValue];
+        NSString *suggest = exact ? WQGameExactChain : @"Documents";
         WQGamePathPickerViewController *picker = [[WQGamePathPickerViewController alloc]
-            initWithGame:([a[@"exact"] boolValue] ? WQGameExactName : (a[@"game"] ?: a[@"name"]))
+            initWithGame:(exact ? WQGameExactName : ([(NSString *)a[@"game"] length] ? a[@"game"] : a[@"name"]))
               container:a[@"path"] relative:@"" suggest:suggest];
         [self.navigationController pushViewController:picker animated:YES];
-    } else if ((NSUInteger)indexPath.row < _paths.count) {
-        WQGameInjectViewController *inject =
-            [[WQGameInjectViewController alloc] initWithEntry:_paths[(NSUInteger)indexPath.row]];
-        [self.navigationController pushViewController:inject animated:YES];
     } else {
-        [self.navigationController pushViewController:[WQGameAddPathViewController new] animated:YES];
+        NSUInteger idx = (NSUInteger)indexPath.row;
+        [self.view endEditing:YES];
+        if (idx < _visiblePaths.count) {
+            WQGameInjectViewController *inject =
+                [[WQGameInjectViewController alloc] initWithEntry:_visiblePaths[idx]];
+            [self.navigationController pushViewController:inject animated:YES];
+        } else {
+            [self.navigationController pushViewController:[WQGameAddPathViewController new] animated:YES];
+        }
     }
 }
 
 - (void)quickDeployTapped:(UIButton *)sender
 {
-    if ((NSUInteger)sender.tag >= _apps.count) return;
-    NSDictionary *a = _apps[(NSUInteger)sender.tag];
+    if ((NSUInteger)sender.tag >= _visibleApps.count) return;
+    NSDictionary *a = _visibleApps[(NSUInteger)sender.tag];
     if (![a[@"exact"] boolValue]) return;
     NSString *container = a[@"path"];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"一键部署默认路径"
@@ -697,6 +892,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
                     WQGameAddPath(entry);
                     wq_log(@"game: quick deploy created %lu dirs -> %@", (unsigned long)created, final);
                     inner->_paths = WQGameLoadPaths();
+                    [inner recomputeVisible];
                     [inner.tableView reloadData];
                     wq_alert(inner, @"已保存", [NSString stringWithFormat:@"新建 %lu 个目录\n%@\n\n可在下方「保存的注入路径」中放入 lua 等资源。",
                                                (unsigned long)created, final]);
@@ -708,14 +904,15 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return indexPath.section == 1 && (NSUInteger)indexPath.row < _paths.count;
+    return indexPath.section == 1 && (NSUInteger)indexPath.row < _visiblePaths.count;
 }
+
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
  forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.section != 1 ||
-        (NSUInteger)indexPath.row >= _paths.count) return;
-    NSString *identifier = _paths[(NSUInteger)indexPath.row][@"id"];
+        (NSUInteger)indexPath.row >= _visiblePaths.count) return;
+    NSString *identifier = _visiblePaths[(NSUInteger)indexPath.row][@"id"];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"删除这条保存项？"
         message:@"只从本应用移除记录，不会删除游戏目录里的任何文件。"
         preferredStyle:UIAlertControllerStyleAlert];
@@ -730,6 +927,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
                 if ([item[@"id"] isEqualToString:identifier]) [all removeObject:item];
             WQGameSavePaths(all);
             s->_paths = all;
+            [s recomputeVisible];
             [s.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
                         withRowAnimation:UITableViewRowAnimationAutomatic];
         }]];

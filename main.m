@@ -2300,27 +2300,44 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     return footer;
 }
 
+// Section order is fixed: the game feature is the primary entry and sits above
+// the low-level container browser and the tools. Keeping the indices in one
+// place means a future reorder cannot pair rows with the wrong handler.
+typedef NS_ENUM(NSInteger, WQRootSection) {
+    WQRootSectionGame = 0,
+    WQRootSectionContainers,
+    WQRootSectionTools,
+};
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    // System Groups is the extra last row, on iOS 27 only.
-    if (section == 0) return (NSInteger)_locations.count + (wq_system_areas_reachable() ? 1 : 0);
-    return section == 1 ? 7 : 1;
+    if (section == WQRootSectionGame) return 1;
+    if (section == WQRootSectionContainers)
+        return (NSInteger)_locations.count + (wq_system_areas_reachable() ? 1 : 0);
+    return 7;   // WQRootSectionTools
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    return @[@"容器", @"工具", @"游戏功能"][section];
+    return @[@"游戏功能", @"容器", @"工具"][section];
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
-    if (section == 0 && !wq_system_areas_reachable())
+    if (section == WQRootSectionGame)
+        return @"点「进入」查看本机已安装应用，选择游戏容器与注入路径并保存，之后即可快捷放入 pak、sig、lua 等资源文件。仅用于本机调试与补齐缺失资源。";
+    if (section == WQRootSectionContainers && !wq_system_areas_reachable())
         return @"iOS 26 上无法访问系统数据与系统组（仅 iOS 27 可用），内部守护进程需扫描全部文件编号：设备文件较多时首次可能耗时近一小时，之后只检查新增文件。若在 iOS 27.0 上出现入口打不开或长时间扫描，请在设置中开启兼容模式并重启。";
-    if (section == 1)
+    if (section == WQRootSectionTools)
         return @"被覆盖或删除的文件会先复制到备份（在文件 App 中也可查看）。长按备份可还原到原位置。";
-    return @"点「进入」查看本机已安装应用，选择游戏容器与注入路径并保存，之后即可快捷放入 pak、sig、lua 等资源文件。仅用于本机调试与补齐缺失资源。";
+    return nil;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    return indexPath.section == WQRootSectionGame ? 64.0 : WQRowHeight;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -2333,22 +2350,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     c.secondaryTextProperties.color = WQColorText2();
     c.imageProperties.tintColor = WQColorText2();
     c.imageProperties.maximumSize = CGSizeMake(WQIconSize, WQIconSize);
-    if (indexPath.section == 0) {
-        if ((NSUInteger)indexPath.row < _locations.count) {
-            NSArray *loc = _locations[(NSUInteger)indexPath.row];
-            c.text = loc[0];
-            c.image = WQLinearIcon(loc[2]);
-        } else {
-            c.text = @"系统组";
-            c.image = WQLinearIcon(@"lock.square.stack");
-        }
-    } else if (indexPath.section == 1) {
-        NSArray *tools = @[@[@"应用列表", @"square.grid.3x3"], @[@"缓存清理", @"trash"], @[@"前往路径…", @"arrow.right.circle"],
-                           @[@"应用备份", @"clock.arrow.circlepath"], @[@"备份", @"clock.arrow.circlepath"], @[@"日志", @"doc.plaintext"],
-                           @[@"设置", @"slider.horizontal.3"]];
-        c.text = tools[(NSUInteger)indexPath.row][0];
-        c.image = WQLinearIcon(tools[(NSUInteger)indexPath.row][1]);
-    } else {
+    c.secondaryText = nil;
+    if (indexPath.section == WQRootSectionGame) {
         c.text = @"游戏资源注入";
         c.secondaryText = @"列出已安装应用 → 选择容器 → 保存路径 → 放入 pak / sig / lua";
         c.secondaryTextProperties.numberOfLines = 2;
@@ -2360,10 +2363,25 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
         enter.textAlignment = NSTextAlignmentRight;
         [enter sizeToFit];
         cell.accessoryView = enter;
+    } else if (indexPath.section == WQRootSectionContainers) {
+        if ((NSUInteger)indexPath.row < _locations.count) {
+            NSArray *loc = _locations[(NSUInteger)indexPath.row];
+            c.text = loc[0];
+            c.image = WQLinearIcon(loc[2]);
+        } else {
+            c.text = @"系统组";
+            c.image = WQLinearIcon(@"lock.square.stack");
+        }
+    } else {
+        NSArray *tools = @[@[@"应用列表", @"square.grid.3x3"], @[@"缓存清理", @"trash"], @[@"前往路径…", @"arrow.right.circle"],
+                           @[@"应用备份", @"clock.arrow.circlepath"], @[@"备份", @"clock.arrow.circlepath"], @[@"日志", @"doc.plaintext"],
+                           @[@"设置", @"slider.horizontal.3"]];
+        c.text = tools[(NSUInteger)indexPath.row][0];
+        c.image = WQLinearIcon(tools[(NSUInteger)indexPath.row][1]);
     }
     cell.contentConfiguration = c;
-    cell.accessoryType = indexPath.section == 2 ? UITableViewCellAccessoryNone
-                                                : UITableViewCellAccessoryDisclosureIndicator;
+    cell.accessoryType = indexPath.section == WQRootSectionGame
+        ? UITableViewCellAccessoryNone : UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
 
@@ -2371,32 +2389,36 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     UIViewController *next = nil;
-    if (indexPath.section == 2) {
+    if (indexPath.section == WQRootSectionGame) {
         next = [WQGameCenterViewController new];
-    } else if (indexPath.section == 0) {
+    } else if (indexPath.section == WQRootSectionContainers) {
         if ((NSUInteger)indexPath.row < _locations.count) {
             NSArray *loc = _locations[(NSUInteger)indexPath.row];
             next = [[WQDirViewController alloc] initWithPath:loc[1] title:loc[0]];
         } else {
             next = [WQSystemGroupsViewController new];
         }
-    } else if (indexPath.row == 0) {
-        next = [WQAppsViewController new];
-    } else if (indexPath.row == 1) {
-        next = [WQCacheCleanerViewController new];
-    } else if (indexPath.row == 2) {
-        [self goToPath];
-        return;
-    } else if (indexPath.row == 3) {
-        [NSFileManager.defaultManager createDirectoryAtPath:wq_app_backup_root() withIntermediateDirectories:YES attributes:nil error:nil];
-        next = [[WQDirViewController alloc] initWithPath:wq_app_backup_root() title:@"应用备份"];
-    } else if (indexPath.row == 4) {
-        [NSFileManager.defaultManager createDirectoryAtPath:wq_backup_root() withIntermediateDirectories:YES attributes:nil error:nil];
-        next = [[WQDirViewController alloc] initWithPath:wq_backup_root() title:@"备份"];
-    } else if (indexPath.row == 6) {
-        next = [WQSettingsViewController new];
-    } else {
-        next = [WQLogViewController new];
+    } else {   // WQRootSectionTools — row handlers are scoped to this section
+        if (indexPath.row == 0) {
+            next = [WQAppsViewController new];
+        } else if (indexPath.row == 1) {
+            next = [WQCacheCleanerViewController new];
+        } else if (indexPath.row == 2) {
+            [self goToPath];
+            return;
+        } else if (indexPath.row == 3) {
+            [NSFileManager.defaultManager createDirectoryAtPath:wq_app_backup_root()
+                                   withIntermediateDirectories:YES attributes:nil error:nil];
+            next = [[WQDirViewController alloc] initWithPath:wq_app_backup_root() title:@"应用备份"];
+        } else if (indexPath.row == 4) {
+            [NSFileManager.defaultManager createDirectoryAtPath:wq_backup_root()
+                                   withIntermediateDirectories:YES attributes:nil error:nil];
+            next = [[WQDirViewController alloc] initWithPath:wq_backup_root() title:@"备份"];
+        } else if (indexPath.row == 6) {
+            next = [WQSettingsViewController new];
+        } else {
+            next = [WQLogViewController new];
+        }
     }
     [self.navigationController pushViewController:next animated:YES];
 }
