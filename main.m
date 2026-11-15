@@ -25,6 +25,7 @@
 #import "WQHexViewer.h"
 #import "WQSQLiteViewer.h"
 #import "WQDesignTokens.h"
+#import "WQLuaDeploy.h"
 
 // Settings keys and helpers are defined with the settings controllers below,
 // but the file browser calls them earlier, so declare them up front.
@@ -2130,7 +2131,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     // System Groups is the extra last row, on iOS 27 only.
-    return section == 0 ? (NSInteger)_locations.count + (wq_system_areas_reachable() ? 1 : 0) : 7;
+    return section == 0 ? (NSInteger)_locations.count + (wq_system_areas_reachable() ? 1 : 0) : 8;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
@@ -2167,7 +2168,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
     } else {
         NSArray *tools = @[@[@"应用列表", @"square.grid.3x3"], @[@"缓存清理", @"trash"], @[@"前往路径…", @"arrow.right.circle"],
                            @[@"应用备份", @"clock.arrow.circlepath"], @[@"备份", @"clock.arrow.circlepath"], @[@"日志", @"doc.plaintext"],
-                           @[@"设置", @"slider.horizontal.3"]];
+                           @[@"设置", @"slider.horizontal.3"],
+                           @[@"Lua 调试脚本", @"doc.badge.plus"]];
         c.text = tools[(NSUInteger)indexPath.row][0];
         c.image = WQLinearIcon(tools[(NSUInteger)indexPath.row][1]);
     }
@@ -2202,6 +2204,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle)
         next = [[WQDirViewController alloc] initWithPath:wq_backup_root() title:@"备份"];
     } else if (indexPath.row == 6) {
         next = [WQSettingsViewController new];
+    } else if (indexPath.row == 7) {
+        next = [WQLuaDeployViewController new];
     } else {
         next = [WQLogViewController new];
     }
