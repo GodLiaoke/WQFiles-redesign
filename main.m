@@ -1950,7 +1950,14 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     } else if (row.isAction) {
         UIButton *control = [UIButton buttonWithType:UIButtonTypeSystem];
         [control setTitle:row.value forState:UIControlStateNormal];
-        WQStylePrimaryButton(control);
+        BOOL strong = row.action == WQSettingActionClearPaths ||
+                      row.action == WQSettingActionResetAll;
+        if (strong) WQStylePrimaryButton(control);
+        else {
+            [control setTitleColor:WQColorText() forState:UIControlStateNormal];
+            control.titleLabel.font = WQFontValue();
+            WQStyleControl(control);
+        }
         control.frame = CGRectMake(0, 0, 84, 32);
         control.tag = (NSInteger)row.action;
         [control addTarget:self action:@selector(actionTapped:) forControlEvents:UIControlEventTouchUpInside];

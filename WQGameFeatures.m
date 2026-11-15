@@ -149,10 +149,21 @@ void WQGameClearStaging(void)
 
 #pragma mark - Filesystem helpers
 
+// A plain lstat answers "missing" for almost every path. Only a real sandbox
+// refusal goes through wq_stat, which may request a token — avoiding hundreds
+// of grants when scanning containers for a marker directory.
+static BOOL WQGameStatFast(NSString *path, struct stat *st)
+{
+    if (lstat(path.fileSystemRepresentation, st) == 0) return YES;
+    int e = errno;
+    if (e != EPERM && e != EACCES) return NO;
+    return wq_stat(path, st);
+}
+
 static BOOL WQGameIsDir(NSString *path)
 {
     struct stat st;
-    if (wq_stat(path, &st)) return S_ISDIR(st.st_mode);
+    if (WQGameStatFast(path, &st)) return S_ISDIR(st.st_mode);
     struct stat target;
     return stat(path.fileSystemRepresentation, &target) == 0 && S_ISDIR(target.st_mode);
 }
@@ -167,7 +178,7 @@ static NSString *_Nullable WQGameEnsureChain(NSString *container, NSString *rel,
         if (!part.length) continue;
         current = [current stringByAppendingPathComponent:part];
         struct stat st;
-        if (wq_stat(current, &st)) {
+        if (WQGameStatFast(current, &st)) {
             if (!S_ISDIR(st.st_mode)) {
                 if (errorText) *errorText = [NSString stringWithFormat:@"%@ 已存在但不是目录", part];
                 return nil;
@@ -504,9 +515,8 @@ static UIView *WQGameCreditFooter(void)
             if (exact) {
                 UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
                 [b setTitle:@"一键部署" forState:UIControlStateNormal];
-                [b setTitleColor:WQColorText() forState:UIControlStateNormal];
+                WQStylePrimaryButton(b);
                 b.titleLabel.font = WQFontValue();
-                WQStyleControl(b);
                 b.frame = CGRectMake(0, 0, 92, 30);
                 b.tag = (NSInteger)idx;
                 [b addTarget:self action:@selector(quickDeployTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -1194,7 +1204,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             NSDictionary *f = files[i];
             NSString *dest = [target stringByAppendingPathComponent:f[@"name"]];
             struct stat st;
-            BOOL exists = wq_stat(dest, &st) && S_ISREG(st.st_mode);
+            BOOL exists = WQGameStatFast(dest, &st) && S_ISREG(st.st_mode);
             NSString *err = nil;
             BOOL ok = exists ? wq_write_from_file(dest, f[@"local"], &err)
                              : wq_create_file_from(dest, f[@"local"], &err);
@@ -1203,7 +1213,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             else {
                 struct stat after;
                 unsigned long long want = [f[@"size"] unsignedLongLongValue];
-                if (!wq_stat(dest, &after) || !S_ISREG(after.st_mode) || (unsigned long long)after.st_size != want)
+                if (!WQGameStatFast(dest, &after) || !S_ISREG(after.st_mode) || (unsigned long long)after.st_size != want)
                     failure = @"写入后校验不一致";
             }
             NSDictionary *r = failure ? @{@"name": f[@"name"], @"error": failure}
