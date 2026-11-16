@@ -1,5 +1,5 @@
-run_id=43928682598
-sdk=success tests=success build=success
+run_id=43932689765
+sdk=success tests=failure build=skipped
 --- xcode / sdk inventory ---
 == runner ==
 ProductName:		macOS
@@ -90,8 +90,8 @@ PASS: explicit small bound still supports successful empty enumeration
 PASS: overflowing scan bound is rejected before work dispatch
 
 == WQAccessTreeTests ==
+PASS: race preserves whichever destination wins exclusion
 PASS: write temp sentinel
-PASS: write racing creator
 PASS: race preserves whichever destination wins exclusion
 
 == WQAccessMeasureTests ==
@@ -105,8 +105,8 @@ PASS: tree copy preserves symlink item without following it
 PASS: copied symlink remains a symlink
 
 == WQAppsCopyTests ==
-2026-11-16 18:26:08.150 WQAppsCopyTests[1428:6855] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-D5501248-8E58-4F70-98F7-7272BF3EB6D9/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-D5501248-8E58-4F70-98F7-7272BF3EB6D9/dst (3 items) OK
-2026-11-16 18:26:08.151 WQAppsCopyTests[1428:6855] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-D5501248-8E58-4F70-98F7-7272BF3EB6D9/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-D5501248-8E58-4F70-98F7-7272BF3EB6D9/empty-dst (0 items) OK
+2026-11-16 18:48:40.889 WQAppsCopyTests[1419:6589] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-6BEB755A-36E7-4174-A82D-54C464F21856/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-6BEB755A-36E7-4174-A82D-54C464F21856/dst (3 items) OK
+2026-11-16 18:48:40.890 WQAppsCopyTests[1419:6589] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-6BEB755A-36E7-4174-A82D-54C464F21856/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-6BEB755A-36E7-4174-A82D-54C464F21856/empty-dst (0 items) OK
 All Apps copy regression tests passed.
 
 == WQAppsSupportTests ==
@@ -126,16 +126,34 @@ All LaunchServices regression tests passed.
 == Python release and static UI checks ==
 
 ----------------------------------------------------------------------
-Ran 16 tests in 1.199s
+Ran 16 tests in 0.576s
 
 OK
 browser UI regression checks: PASS
 
 == Strict iOS arm64 syntax/link checks ==
-iOS syntax and link checks: PASS
-Info.plist: OK
-entitlements.plist: OK
-
-All requested regression suites passed. Logs retained in: /Users/runner/work/WQFiles-redesign/WQFiles-redesign/.work/tests/all.x7ChHA
+WQGameFeatures.m:525:30: error: 'mainScreen' is deprecated: first deprecated in iOS 26.0 - Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context. [-Werror,-Wdeprecated-declarations]
+  525 |     CGFloat width = UIScreen.mainScreen.bounds.size.width;
+      |                              ^
+/Applications/Xcode_26.3.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:57:49: note: property 'mainScreen' is declared deprecated here
+   57 | @property(class, nonatomic, readonly) UIScreen *mainScreen API_DEPRECATED("Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.", ios(2.0, 26.0), tvos(9.0, 26.0), visionos(1.0, 26.0)) API_UNAVAILABLE(watchos);
+      |                                                 ^
+/Applications/Xcode_26.3.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:57:49: note: 'mainScreen' has been explicitly marked deprecated here
+1 error generated.
+WQExtras.m:84:30: error: 'mainScreen' is deprecated: first deprecated in iOS 26.0 - Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context. [-Werror,-Wdeprecated-declarations]
+   84 |     CGFloat width = UIScreen.mainScreen.bounds.size.width;
+      |                              ^
+/Applications/Xcode_26.3.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:57:49: note: property 'mainScreen' is declared deprecated here
+   57 | @property(class, nonatomic, readonly) UIScreen *mainScreen API_DEPRECATED("Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.", ios(2.0, 26.0), tvos(9.0, 26.0), visionos(1.0, 26.0)) API_UNAVAILABLE(watchos);
+      |                                                 ^
+/Applications/Xcode_26.3.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:57:49: note: 'mainScreen' has been explicitly marked deprecated here
+1 error generated.
+main.m:2365:78: error: 'mainScreen' is deprecated: first deprecated in iOS 26.0 - Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context. [-Werror,-Wdeprecated-declarations]
+ 2365 |     UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, UIScreen.mainScreen.bounds.size.width, 72)];
+      |                                                                              ^
+/Applications/Xcode_26.3.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:57:49: note: property 'mainScreen' is declared deprecated here
+   57 | @property(class, nonatomic, readonly) UIScreen *mainScreen API_DEPRECATED("Use a UIScreen instance found through context instead (i.e, view.window.windowScene.screen), or for properties like UIScreen.scale with trait equivalents, use a traitCollection found through context.", ios(2.0, 26.0), tvos(9.0, 26.0), visionos(1.0, 26.0)) API_UNAVAILABLE(watchos);
+      |                                                 ^
+/Applications/Xcode_26.3.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIScreen.h:57:49: note: 'mainScreen' has been explicitly marked deprecated here
+1 error generated.
 --- build (tail) ---
-wrote /Users/runner/work/WQFiles-redesign/WQFiles-redesign/WQFiles.ipa
