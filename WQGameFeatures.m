@@ -518,11 +518,10 @@ static CGFloat WQGameFormHeight(void)
 // Plain left-aligned credit text at the top of the game page. No card, no
 // badge, no capsule, no coloured emblem; width follows the table view.
 
-static UIView *WQGameCreditHeader(void)
+static UIView *WQGameCreditHeader(CGFloat width)
 {
     // Pure text header. A fixed 360pt frame and a rounded panel caused the
     // credit block to sit off-centre on narrow and wide screens.
-    CGFloat width = UIScreen.mainScreen.bounds.size.width;
     UIView *outer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 76)];
     outer.backgroundColor = UIColor.clearColor;
     outer.autoresizingMask = UIViewAutoresizingFlexibleWidth;
@@ -678,7 +677,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     self.navigationController.navigationBar.prefersLargeTitles = NO;
     WQStyleTableView(self.tableView);
     self.tableView.separatorColor = WQColorLine();
-    self.tableView.tableHeaderView = WQGameCreditHeader();
+    self.tableView.tableHeaderView = WQGameCreditHeader(CGRectGetWidth(self.tableView.bounds));
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"重新检测" style:UIBarButtonItemStylePlain

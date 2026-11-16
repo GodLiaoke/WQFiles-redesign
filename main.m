@@ -2308,7 +2308,7 @@ static UIView *WQRootGameBackground(void)
 {
     [super viewWillAppear:animated];
     [self rebuildLocations];
-    self.tableView.tableHeaderView = WQOverviewHeader();
+    self.tableView.tableHeaderView = WQOverviewHeader(CGRectGetWidth(self.tableView.bounds));
     [self.tableView reloadData];
 }
 
@@ -2319,7 +2319,7 @@ static UIView *WQRootGameBackground(void)
     self.tableView.backgroundColor = WQColorBackground();
     self.tableView.separatorColor = WQColorLine();
     self.tableView.tableFooterView = [self authorFooter];
-    self.tableView.tableHeaderView = WQOverviewHeader();
+    self.tableView.tableHeaderView = WQOverviewHeader(CGRectGetWidth(self.tableView.bounds));
     dispatch_async(wq_io(), ^{
         NSString *recovery = wq_recover_interrupted_restore();
         if (recovery) {
@@ -2362,7 +2362,7 @@ static UIView *WQRootGameBackground(void)
 // Plain left-aligned credits: no capsule buttons, badges or decorative links.
 - (UIView *)authorFooter
 {
-    UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, UIScreen.mainScreen.bounds.size.width, 72)];
+    UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.tableView.bounds), 72)];
     footer.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     UILabel *by = [UILabel new];
     NSDictionary *info = NSBundle.mainBundle.infoDictionary;

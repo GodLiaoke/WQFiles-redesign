@@ -78,10 +78,9 @@ static UILabel *WQStatLabel(NSString *text, UIFont *font, UIColor *color)
 #pragma mark - Overview
 
 
-UIView *WQOverviewHeader(void)
+UIView *WQOverviewHeader(CGFloat width)
 {
-    // Plain two-line text, no rounded card, width follows the table view.
-    CGFloat width = UIScreen.mainScreen.bounds.size.width;
+    // Plain two-line text, no rounded card, width comes from the table view.
     UIView *outer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 66)];
     outer.backgroundColor = UIColor.clearColor;
     outer.autoresizingMask = UIViewAutoresizingFlexibleWidth;

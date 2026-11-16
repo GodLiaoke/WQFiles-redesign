@@ -117,4 +117,9 @@ require(main, "window.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;", 
 forbid(main, "WQGlassPanel(WQRadius4)", "no rounded card panels")
 forbid(game, "CGRectMake(0, 0, 360", "no fixed-width headers")
 
+for name in ("main.m", "WQExtras.m", "WQGameFeatures.m"):
+    forbid((ROOT / name).read_text(), "UIScreen.mainScreen", "no deprecated screen API in " + name)
+forbid(main, "CGRectMake(0, 0, 320", "no fixed-width footer")
+forbid(game, "CGRectMake(0, 0, 360", "no fixed-width header")
+
 print("browser UI regression checks: PASS")

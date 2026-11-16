@@ -20,7 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 // Glass overview panel on the home screen; rebuild on each appearance.
-UIView *WQOverviewHeader(void);
+UIView *WQOverviewHeader(CGFloat width);
 
 NSUInteger WQBookmarkCount(void);
 void WQBookmarkClear(void);
