@@ -1701,6 +1701,19 @@ static NSString *const kSystemGroupRoot = @"/private/var/containers/Shared/Syste
     [super viewDidLoad];
     self.delegate = self;
     self.interactivePopGestureRecognizer.delegate = self;
+
+    // iOS 26+ gives bars the Liquid Glass material automatically, but an
+    // appearance with an opaque background would replace it. Use the system
+    // default for both states and keep the whole chrome neutral.
+    UINavigationBar *bar = self.navigationBar;
+    UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
+    [appearance configureWithDefaultBackground];
+    appearance.titleTextAttributes = @{NSForegroundColorAttributeName: WQColorText()};
+    appearance.largeTitleTextAttributes = @{NSForegroundColorAttributeName: WQColorText()};
+    bar.standardAppearance = appearance;
+    bar.scrollEdgeAppearance = appearance;
+    bar.compactAppearance = appearance;
+    bar.tintColor = WQColorText();
 }
 
 - (void)navigationController:(UINavigationController *)nav willShowViewController:(UIViewController *)vc animated:(BOOL)animated
@@ -1837,7 +1850,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
             @"全部应用数据会遍历整棵容器目录树。若 iOS 27.0 上系统数据打不开、或列表一直停在扫描，请开启兼容模式并彻底退出后重开：它会隐藏系统区域，改用 iOS 26 的授权方式与容器列表。切换后需重启才能完全生效。",
             @"快速目录读取用一次目录遍历拿到子文件夹，避免逐个子项授权；并行写入同时处理多个资源文件；检测缓存复用已解析的应用标识。列表缓存时长决定返回页面时是否重读目录。全部开关即时生效。",
             @"注入暂存是导入后、写入前的临时副本。正常写入会自动清理，异常退出可能留下残留。备份不会被这里的清理操作删除。",
-            @"配色、圆角与间距由统一设计变量固定；紧凑行高只改变列表密度。",
+            @"液态玻璃只用于导航栏、主入口、按钮与输入控件，内容列表保持平面。关闭后改用中性平面材质；系统开启「降低透明度」时也会自动降级。配色、圆角与间距仍由统一设计变量固定。",
             @"递归删除会清空目录内容，且不逐份保留备份。覆盖与保存校验由访问层固定开启，不提供关闭。",
             @"以下操作不可撤销。清空路径只移除本应用保存的记录，不会删除游戏目录里的文件；重置设置会恢复全部开关默认值，但保留备份与注入路径。",
         ];
@@ -1855,9 +1868,10 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
               WQDynamicRow(@"已保存注入路径", @"paths"),
               WQActionRow(@"清除检测缓存", @"清除", WQSettingActionClearCache),
               WQActionRow(@"打开备份", @"打开", WQSettingActionOpenBackups)],
-            @[WQValueRow(@"外观", @"浅色"),
+            @[WQDynamicRow(@"材质", @"glassState"),
+              WQSwitchRow(@"液态玻璃材质", WQGlassEnabledKey),
               WQValueRow(@"图标", @"线性"),
-              WQValueRow(@"圆角", @"8 点"),
+              WQValueRow(@"圆角", @"8 / 20 点"),
               WQValueRow(@"间距档位", @"4 点"),
               WQSwitchRow(@"紧凑行高", WQSettingCompactRowsKey)],
             @[WQSwitchRow(@"删除非空目录", WQSettingDeleteTreeKey),
@@ -1890,6 +1904,9 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
         return wq_legacy_scope() ? @"兼容模式"
             : (wq_system_areas_reachable() ? @"iOS 27 原生" : @"iOS 26 方式");
     if ([key isEqualToString:@"reloadAge"]) return WQSettingReloadAgeText();
+    if ([key isEqualToString:@"glassState"])
+        return !WQGlassEnabled() ? @"平面中性"
+            : (WQGlassClassAvailable() ? @"系统液态玻璃" : @"系统材质（降级）");
     if ([key isEqualToString:@"staging"]) {
         NSUInteger n = WQGameStagingFileCount();
         return n ? [NSString stringWithFormat:@"%lu 个文件 · %@", (unsigned long)n,
@@ -1942,7 +1959,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
                           [row.key isEqualToString:WQSettingFastDirKey] ||
                           [row.key isEqualToString:WQSettingParallelWriteKey] ||
                           [row.key isEqualToString:WQSettingDetectCacheKey];
-        control.on = WQSettingBool(row.key, defaultsOn);
+        control.on = [row.key isEqualToString:WQGlassEnabledKey]
+            ? WQGlassEnabled() : WQSettingBool(row.key, defaultsOn);
         control.onTintColor = WQColorStrong();
         control.tag = indexPath.section * 100 + indexPath.row;
         [control addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
@@ -1993,6 +2011,10 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     // a restart, which the group footer states.
     if ([row.key isEqualToString:WQSettingLegacyScopeKey]) wq_set_legacy_scope(sender.on);
     if ([row.key isEqualToString:WQSettingDetectCacheKey] && !sender.on) WQGameClearDetectionCache();
+    if ([row.key isEqualToString:WQGlassEnabledKey]) {
+        [self.tableView reloadData];
+        wq_alert(self, @"材质已切换", @"新打开的页面会立即使用新材质；当前已加载的页面重新进入后生效。");
+    }
     if ([row.key isEqualToString:WQSettingCompactRowsKey]) [self.tableView reloadData];
     wq_log(@"settings: %@ = %d", row.key, sender.on ? 1 : 0);
 }
@@ -2072,7 +2094,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
             for (NSString *key in @[WQSettingShowAllDataKey, WQSettingDeleteTreeKey,
                                     WQSettingLegacyScopeKey, WQSettingFastDirKey,
                                     WQSettingParallelWriteKey, WQSettingDetectCacheKey,
-                                    WQSettingCompactRowsKey, WQSettingReloadAgeIdxKey])
+                                    WQSettingCompactRowsKey, WQSettingReloadAgeIdxKey,
+                                    WQGlassEnabledKey])
                 [defaults removeObjectForKey:key];
             wq_set_legacy_scope(NO);
             WQGameClearDetectionCache();
@@ -2191,6 +2214,24 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
 @end
 
 #pragma mark - Root
+
+// The single primary entry is a floating glass panel. It sits in the control
+// layer (it navigates), so glass is appropriate here; content rows stay flat.
+static UIView *WQRootGameBackground(void)
+{
+    UIView *outer = [UIView new];
+    outer.backgroundColor = UIColor.clearColor;
+    UIView *panel = WQGlassPanel(WQRadius4);
+    [outer addSubview:panel];
+    panel.translatesAutoresizingMaskIntoConstraints = NO;
+    [NSLayoutConstraint activateConstraints:@[
+        [panel.leadingAnchor constraintEqualToAnchor:outer.leadingAnchor constant:WQGutter],
+        [panel.trailingAnchor constraintEqualToAnchor:outer.trailingAnchor constant:-WQGutter],
+        [panel.topAnchor constraintEqualToAnchor:outer.topAnchor constant:WQSpace2],
+        [panel.bottomAnchor constraintEqualToAnchor:outer.bottomAnchor constant:-WQSpace2],
+    ]];
+    return outer;
+}
 
 @interface WQRootViewController : UITableViewController
 @end
@@ -2327,7 +2368,7 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     if (section == WQRootSectionGame)
-        return @"点「进入」查看本机已安装应用，选择游戏容器与注入路径并保存，之后即可快捷放入 pak、sig、lua 等资源文件。仅用于本机调试与补齐缺失资源。";
+        return @"点「进入」查看本机已安装应用，选择游戏容器与注入路径并保存，之后即可快捷放入 pak、sig、lua 等资源文件。仅用于本机调试与补齐缺失资源。\n\n游戏功能 by 淮季 · 公益频道@HeiMaoClub";
     if (section == WQRootSectionContainers && !wq_system_areas_reachable())
         return @"iOS 26 上无法访问系统数据与系统组（仅 iOS 27 可用），内部守护进程需扫描全部文件编号：设备文件较多时首次可能耗时近一小时，之后只检查新增文件。若在 iOS 27.0 上出现入口打不开或长时间扫描，请在设置中开启兼容模式并重启。";
     if (section == WQRootSectionTools)
@@ -2337,7 +2378,7 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return indexPath.section == WQRootSectionGame ? 64.0 : WQRowHeight;
+    return indexPath.section == WQRootSectionGame ? 96.0 : WQRowHeight;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -2345,6 +2386,7 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"r"]
         ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"r"];
     cell.accessoryView = nil;
+    cell.backgroundView = nil;
     UIListContentConfiguration *c = cell.defaultContentConfiguration;
     c.textProperties.color = WQColorText();
     c.secondaryTextProperties.color = WQColorText2();
@@ -2353,9 +2395,14 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
     c.secondaryText = nil;
     if (indexPath.section == WQRootSectionGame) {
         c.text = @"游戏资源注入";
-        c.secondaryText = @"列出已安装应用 → 选择容器 → 保存路径 → 放入 pak / sig / lua";
+        c.secondaryText = @"选择容器 → 保存注入路径 → 放入 pak / sig / lua\nby 淮季 · 公益频道@HeiMaoClub";
         c.secondaryTextProperties.numberOfLines = 2;
+        c.textProperties.font = WQFontTitle();
         c.image = WQLinearIcon(@"gamecontroller");
+        c.imageProperties.maximumSize = CGSizeMake(28.0, 28.0);
+        c.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(WQSpace4, WQSpace6, WQSpace4, WQSpace3);
+        cell.backgroundView = WQRootGameBackground();
+        cell.backgroundColor = UIColor.clearColor;
         UILabel *enter = [UILabel new];
         enter.text = @"进入";
         enter.font = WQFontValue();

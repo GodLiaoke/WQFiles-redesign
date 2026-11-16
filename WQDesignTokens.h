@@ -3,13 +3,15 @@
 //  WQ Files — 界面设计变量
 //  GPL-3.0-or-later.
 //
-//  规范：中性色、固定档位间距与圆角、统一线性图标、无渐变无发光、无装饰徽章。
-//  所有视图只引用这里的常量，不写死数值。
+//  玻璃只用于导航与主控件层（WQGlass.h），内容列表保持平面。
+//  配色改用系统动态中性色：浅色/深色/高对比自动适配，靠明暗分层而非彩色。
+//  间距与圆角仍走固定档位，统一线性图标，无自绘渐变、发光或装饰徽章。
 //
 
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
+#import "WQGlass.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -25,12 +27,13 @@ NS_ASSUME_NONNULL_BEGIN
 #define WQSpace8  32.0   /* 组间留白 */
 #define WQSpace12 48.0
 
-#pragma mark - 圆角档位（0 / 4 / 8 / 12）
+#pragma mark - 圆角档位（0 / 4 / 8 / 12 / 20）
 
 #define WQRadius0 0.0
 #define WQRadius1 4.0
 #define WQRadius2 8.0   /* 控件统一圆角 */
 #define WQRadius3 12.0
+#define WQRadius4 20.0  /* 玻璃面板 / 主入口 */
 
 #pragma mark - 结构尺寸（左边缘对齐的基准）
 
@@ -42,38 +45,33 @@ NS_ASSUME_NONNULL_BEGIN
 #define WQControlH  44.0  /* 输入框、主按钮高度 */
 #define WQHintSpace 18.0  /* 表单错误提示固定占位高度 */
 
-/* This header is shared by several translation units. Mark helpers unused so
-   -Wall -Wextra -Werror builds do not fail in files that use only a subset. */
 #define WQ_INLINE static inline __attribute__((unused))
 
-#pragma mark - 中性色（仅靠明暗对比，禁止渐变、发光、彩色强调）
+#pragma mark - 中性色（系统动态色，自动适配浅色/深色/高对比）
 
-// 页面底色
-WQ_INLINE UIColor *WQColorBackground(void) { return [UIColor colorWithRed:0.969 green:0.969 blue:0.965 alpha:1.0]; }
-// 控件底色
-WQ_INLINE UIColor *WQColorSurface(void)   { return UIColor.whiteColor; }
-WQ_INLINE UIColor *WQColorSurface2(void)  { return [UIColor colorWithRed:0.941 green:0.941 blue:0.933 alpha:1.0]; }
-// 1px 结构分隔线，不用于外层卡片边框
-WQ_INLINE UIColor *WQColorLine(void)      { return [UIColor colorWithRed:0.890 green:0.890 blue:0.878 alpha:1.0]; }
-// 文字三级
-WQ_INLINE UIColor *WQColorText(void)      { return [UIColor colorWithRed:0.114 green:0.114 blue:0.106 alpha:1.0]; }
-WQ_INLINE UIColor *WQColorText2(void)     { return [UIColor colorWithRed:0.424 green:0.424 blue:0.408 alpha:1.0]; }
-WQ_INLINE UIColor *WQColorText3(void)     { return [UIColor colorWithRed:0.604 green:0.604 blue:0.580 alpha:1.0]; }
-// 主要操作与危险操作：同一个深中性色，不用红色、不用蓝色
-WQ_INLINE UIColor *WQColorStrong(void)    { return [UIColor colorWithRed:0.173 green:0.173 blue:0.165 alpha:1.0]; }
-WQ_INLINE UIColor *WQColorOnStrong(void)  { return UIColor.whiteColor; }
+WQ_INLINE UIColor *WQColorBackground(void)  { return UIColor.systemGroupedBackgroundColor; }
+WQ_INLINE UIColor *WQColorSurface(void)     { return UIColor.secondarySystemGroupedBackgroundColor; }
+WQ_INLINE UIColor *WQColorSurface2(void)    { return UIColor.tertiarySystemGroupedBackgroundColor; }
+WQ_INLINE UIColor *WQColorLine(void)        { return UIColor.separatorColor; }
+WQ_INLINE UIColor *WQColorText(void)        { return UIColor.labelColor; }
+WQ_INLINE UIColor *WQColorText2(void)       { return UIColor.secondaryLabelColor; }
+WQ_INLINE UIColor *WQColorText3(void)       { return UIColor.tertiaryLabelColor; }
+// 主要操作：动态标签色，深色模式下自动反相，不用红/蓝强调
+WQ_INLINE UIColor *WQColorStrong(void)      { return UIColor.labelColor; }
+WQ_INLINE UIColor *WQColorOnStrong(void)    { return UIColor.labelColor; }
 
 #pragma mark - 字体
 
-WQ_INLINE UIFont *WQFontTitle(void)  { return [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold]; }
-WQ_INLINE UIFont *WQFontBody(void)   { return [UIFont systemFontOfSize:15 weight:UIFontWeightRegular]; }
-WQ_INLINE UIFont *WQFontGroup(void)  { return [UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; }
-WQ_INLINE UIFont *WQFontCaption(void){ return [UIFont systemFontOfSize:12 weight:UIFontWeightRegular]; }
-WQ_INLINE UIFont *WQFontValue(void)  { return [UIFont systemFontOfSize:13 weight:UIFontWeightRegular]; }
+WQ_INLINE UIFont *WQFontTitle(void)   { return [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold]; }
+WQ_INLINE UIFont *WQFontHeadline(void){ return [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; }
+WQ_INLINE UIFont *WQFontBody(void)    { return [UIFont systemFontOfSize:15 weight:UIFontWeightRegular]; }
+WQ_INLINE UIFont *WQFontGroup(void)   { return [UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; }
+WQ_INLINE UIFont *WQFontCaption(void) { return [UIFont systemFontOfSize:12 weight:UIFontWeightRegular]; }
+WQ_INLINE UIFont *WQFontValue(void)   { return [UIFont systemFontOfSize:13 weight:UIFontWeightRegular]; }
 
 #pragma mark - 统一线性图标
 
-// 只用描边型 SF Symbol（非 .fill 变体），统一线宽与点尺寸，统一中性色。
+// 只用描边型 SF Symbol（非 .fill 变体），统一线宽与点尺寸。
 // 禁止：表情符号、彩色服务方块、圆角徽章、图标底衬、感叹号类符号。
 WQ_INLINE UIImage *WQLinearIcon(NSString * _Nullable name)
 {
@@ -87,27 +85,20 @@ WQ_INLINE UIImage *WQLinearIcon(NSString * _Nullable name)
     return [image imageWithTintColor:WQColorText2() renderingMode:UIImageRenderingModeAlwaysOriginal];
 }
 
-#pragma mark - 样式应用（禁止 shadow / gradient / blur）
+#pragma mark - 样式应用（系统材质，无自绘 shadow / gradient）
 
+// Secondary controls: a light glass surface, no hard 1px border.
 WQ_INLINE void WQStyleControl(UIView *view)
 {
-    view.layer.cornerRadius = WQRadius2;
-    view.layer.masksToBounds = YES;
-    view.layer.shadowOpacity = 0;            // 无发光
-    view.layer.shadowRadius = 0;
-    view.layer.borderWidth = 1.0;
-    view.layer.borderColor = WQColorLine().CGColor;
-    view.backgroundColor = WQColorSurface();
+    WQGlassAttach(view, NO, WQRadius2);
 }
 
+// Primary action: tinted-but-neutral glass, never a solid dark block.
 WQ_INLINE void WQStylePrimaryButton(UIButton *button)
 {
-    button.layer.cornerRadius = WQRadius2;
-    button.layer.masksToBounds = YES;
-    button.layer.shadowOpacity = 0;
-    button.backgroundColor = WQColorStrong();
-    [button setTitleColor:WQColorOnStrong() forState:UIControlStateNormal];
-    button.titleLabel.font = WQFontBody();
+    WQGlassAttach(button, YES, WQRadius2);
+    [button setTitleColor:WQColorText() forState:UIControlStateNormal];
+    button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
 }
 
 #pragma mark - 全局设置（多个视图共用，键只在这里定义一次）
@@ -121,8 +112,6 @@ WQ_INLINE void WQStylePrimaryButton(UIButton *button)
 #define WQSettingCompactRowsKey     @"WQSettingCompactRows"
 #define WQSettingReloadAgeIdxKey    @"WQSettingReloadAgeIdx"
 
-// A missing key means "use the default", so turning a switch off is distinct
-// from never having touched it.
 WQ_INLINE BOOL WQSettingGet(NSString *key, BOOL fallback)
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
@@ -134,8 +123,6 @@ WQ_INLINE void WQSettingPut(NSString *key, BOOL value)
     [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
 }
 
-// How long a directory listing stays fresh when returning to a screen.
-// The old fixed 2 seconds made every back-navigation re-read the whole folder.
 WQ_INLINE NSTimeInterval WQSettingReloadAge(void)
 {
     NSInteger idx = [NSUserDefaults.standardUserDefaults integerForKey:WQSettingReloadAgeIdxKey];

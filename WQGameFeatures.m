@@ -14,6 +14,7 @@
 
 static NSString *const WQGameAppRoot = @"/private/var/mobile/Containers/Data/Application";
 static NSString *const WQGamePathsKey = @"WQGameSavedPathsV1";
+static NSString *const WQGameLastAppsKey = @"WQGameLastAppsV1";
 static NSString *const WQGameRiskNote =
     @"仅用于本机调试或补齐缺失资源。写入前请先完全退出游戏、写入期间不要启动它；"
     @"写入不是快照，游戏仍在运行可能损坏存档。同名文件会被替换，替换前在「备份」中保留副本。"
@@ -99,15 +100,57 @@ static void WQGameSavePaths(NSArray<NSDictionary *> *paths)
 {
     [NSUserDefaults.standardUserDefaults setObject:paths forKey:WQGamePathsKey];
 }
+// Re-deploying the same chain must refresh the entry, not pile up duplicates.
 static void WQGameAddPath(NSDictionary *entry)
 {
     NSMutableArray *all = [WQGameLoadPaths() mutableCopy];
+    NSString *container = entry[@"container"], *relative = entry[@"relative"];
+    for (NSDictionary *item in [all copy])
+        if ([item[@"container"] isEqualToString:container] &&
+            [item[@"relative"] isEqualToString:relative]) [all removeObject:item];
     [all addObject:entry];
     WQGameSavePaths(all);
 }
 static NSString *WQGameFullPath(NSDictionary *entry)
 {
     return [entry[@"container"] stringByAppendingPathComponent:entry[@"relative"]];
+}
+
+// A slim, validated snapshot of the last successful detection. On a cold start
+// it renders immediately (stale-while-revalidate) while the real scan runs in
+// the background, so the page never opens empty or frozen.
+static NSArray<NSDictionary *> *WQGameLoadCachedApps(void)
+{
+    NSArray *raw = [NSUserDefaults.standardUserDefaults arrayForKey:WQGameLastAppsKey] ?: @[];
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray new];
+    for (id item in raw) {
+        if (![item isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *d = item;
+        NSString *path = d[@"path"];
+        if (![path isKindOfClass:NSString.class] || ![path hasPrefix:@"/"]) continue;
+        NSMutableDictionary *clean = [NSMutableDictionary new];
+        for (NSString *key in @[@"path", @"bid", @"name", @"game", @"exact", @"sort"])
+            if (d[key]) clean[key] = d[key];
+        if (!clean[@"name"]) clean[@"name"] = path.lastPathComponent;
+        if (!clean[@"bid"]) clean[@"bid"] = @"";
+        if (!clean[@"game"]) clean[@"game"] = @"";
+        if (!clean[@"exact"]) clean[@"exact"] = @(NO);
+        if (!clean[@"sort"]) clean[@"sort"] = @(2);
+        [out addObject:clean];
+    }
+    return out;
+}
+
+static void WQGameSaveCachedApps(NSArray<NSDictionary *> *apps)
+{
+    if (!apps.count) return;   // never persist an empty/failed detection
+    NSMutableArray<NSDictionary *> *slim = [NSMutableArray arrayWithCapacity:apps.count];
+    for (NSDictionary *a in apps)
+        [slim addObject:@{@"path": a[@"path"] ?: @"", @"bid": a[@"bid"] ?: @"",
+                          @"name": a[@"name"] ?: @"", @"game": a[@"game"] ?: @"",
+                          @"exact": @([a[@"exact"] boolValue]),
+                          @"sort": a[@"sort"] ?: @(2)}];
+    [NSUserDefaults.standardUserDefaults setObject:slim forKey:WQGameLastAppsKey];
 }
 
 NSUInteger WQGameSavedPathCount(void) { return WQGameLoadPaths().count; }
@@ -296,12 +339,14 @@ static NSArray<NSDictionary *> *WQGameScanApps(BOOL force, NSString *_Nullable *
         gWQAppCacheTime = CFAbsoluteTimeGetCurrent();
     }
     if (sourceOut) *sourceOut = source ?: @"未找到";
+    if (apps.count) WQGameSaveCachedApps(apps);
     wq_log(@"game: %lu containers via %@", (unsigned long)candidates.count, source ?: @"未找到");
     return apps;
 }
 
 void WQGameClearDetectionCache(void)
 {
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:WQGameLastAppsKey];
     @synchronized (WQGameCenterViewController.class) {
         gWQAppCache = nil;
         gWQAppCacheSource = nil;
@@ -435,33 +480,51 @@ static CGFloat WQGameFormHeight(void)
     return WQSpace3 + 18.0 + WQSpace2 + WQControlH + WQSpace1 + WQHintSpace + WQSpace3;
 }
 
-// Plain-text credit view: no badge, no border, no colour.
-static UIView *WQGameCreditFooter(void)
+// A prominent, functional glass panel at the very top of the game page.
+// Credit is part of the chrome, so glass is appropriate; it is plain neutral
+// text, never a badge, capsule or coloured emblem.
+static UIView *WQGameCreditHeader(void)
 {
-    UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 74)];
+    UIView *outer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 360, 126)];
+    outer.backgroundColor = UIColor.clearColor;
+
+    UIView *panel = WQGlassPanel(WQRadius4);
+    [outer addSubview:panel];
+    [NSLayoutConstraint activateConstraints:@[
+        [panel.leadingAnchor constraintEqualToAnchor:outer.leadingAnchor constant:WQGutter],
+        [panel.trailingAnchor constraintEqualToAnchor:outer.trailingAnchor constant:-WQGutter],
+        [panel.topAnchor constraintEqualToAnchor:outer.topAnchor constant:WQSpace3],
+        [panel.bottomAnchor constraintEqualToAnchor:outer.bottomAnchor constant:-WQSpace3],
+    ]];
+
     UILabel *by = [UILabel new];
     by.text = @"by 淮季";
-    by.font = WQFontCaption();
-    by.textColor = WQColorText2();
+    by.font = WQFontTitle();
+    by.textColor = WQColorText();
     by.textAlignment = NSTextAlignmentLeft;
-    by.translatesAutoresizingMaskIntoConstraints = NO;
-    [v addSubview:by];
     UILabel *channel = [UILabel new];
     channel.text = @"公益频道@HeiMaoClub";
-    channel.font = WQFontCaption();
-    channel.textColor = WQColorText3();
+    channel.font = WQFontBody();
+    channel.textColor = WQColorText2();
     channel.textAlignment = NSTextAlignmentLeft;
-    channel.translatesAutoresizingMaskIntoConstraints = NO;
-    [v addSubview:channel];
+    UILabel *note = [UILabel new];
+    note.text = @"游戏资源注入 · 本机调试与补齐缺失资源";
+    note.font = WQFontCaption();
+    note.textColor = WQColorText3();
+    note.textAlignment = NSTextAlignmentLeft;
+
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[by, channel, note]];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.alignment = UIStackViewAlignmentLeading;
+    stack.spacing = WQSpace1;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [panel addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
-        [by.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:WQGutter],
-        [by.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-WQGutter],
-        [by.topAnchor constraintEqualToAnchor:v.topAnchor constant:WQSpace6],
-        [channel.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:WQGutter],
-        [channel.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-WQGutter],
-        [channel.topAnchor constraintEqualToAnchor:by.bottomAnchor constant:WQSpace1],
+        [stack.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:WQSpace4],
+        [stack.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-WQSpace4],
+        [stack.centerYAnchor constraintEqualToAnchor:panel.centerYAnchor],
     ]];
-    return v;
+    return outer;
 }
 
 #pragma mark - Search helpers
@@ -578,6 +641,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     NSArray<NSDictionary *> *_visibleApps;   // filtered, or the preview slice
     NSArray<NSDictionary *> *_visiblePaths;
     NSArray<NSString *> *_queryTokens;
+    NSDictionary<NSString *, NSNumber *> *_pathCounts;   // container -> saved path count
     BOOL _searching;
     BOOL _detecting;
     BOOL _showAllApps;
@@ -591,7 +655,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     self.navigationController.navigationBar.prefersLargeTitles = NO;
     self.tableView.backgroundColor = WQColorBackground();
     self.tableView.separatorColor = WQColorLine();
-    self.tableView.tableFooterView = WQGameCreditFooter();
+    self.tableView.tableHeaderView = WQGameCreditHeader();
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"重新检测" style:UIBarButtonItemStylePlain
@@ -612,7 +676,12 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     _visibleApps = @[];
     _visiblePaths = @[];
     _queryTokens = @[];
+    _pathCounts = @{};
     _paths = WQGameLoadPaths();
+    // Stale-while-revalidate: show the last good detection instantly, then
+    // refresh in the background. The user can act on it while it refreshes.
+    _apps = WQGameLoadCachedApps();
+    _statusText = _apps.count ? @"上次检测" : nil;
     [self recomputeVisible];
     [self redetect];
 }
@@ -620,7 +689,9 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    _paths = WQGameLoadPaths();
+    NSArray<NSDictionary *> *fresh = WQGameLoadPaths();
+    if ([fresh isEqualToArray:_paths]) return;   // keep scroll position otherwise
+    _paths = fresh;
     [self recomputeVisible];
     [self.tableView reloadData];
 }
@@ -630,6 +701,13 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
 // a stale or differently-filtered array.
 - (void)recomputeVisible
 {
+    NSMutableDictionary<NSString *, NSNumber *> *counts = [NSMutableDictionary new];
+    for (NSDictionary *entry in _paths ?: @[]) {
+        NSString *container = entry[@"container"] ?: @"";
+        counts[container] = @([counts[container] unsignedIntegerValue] + 1);
+    }
+    _pathCounts = counts;
+
     BOOL searching = _queryTokens.count > 0;
     _searching = searching;
     if (searching) {
@@ -660,7 +738,9 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
 - (void)redetect
 {
     _detecting = YES;
-    _apps = @[];
+    // Keep the cached list rendered; header/footer show "refreshing" instead
+    // of blanking the whole screen. Only a cold start with no cache shows a
+    // single loading row.
     _statusText = @"正在查找应用容器…";
     [self recomputeVisible];
     [self.tableView reloadData];
@@ -685,7 +765,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if (section == 1) return (NSInteger)_visiblePaths.count + 1;   // + add-path row
-    if (_detecting) return 1;
+    if (_detecting && !_apps.count) return 1;
     if (!_apps.count) return 3;   // status + 查看日志 + 手动填写
     if (_searching && !_visibleApps.count) return 1;   // no-match row
     return (NSInteger)_visibleApps.count + ([self hasMoreRow] ? 1 : 0);
@@ -696,6 +776,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     if (section == 0) {
         if (_searching && !_detecting && _apps.count)
             return [NSString stringWithFormat:@"已安装应用 · %lu 项匹配", (unsigned long)_visibleApps.count];
+        if (_detecting && _apps.count) return @"已安装应用 · 正在刷新…";
         return @"已安装应用 · 选择容器";
     }
     if (_searching)
@@ -706,8 +787,9 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     if (section == 0) {
-        NSString *count = _detecting ? @"正在检测…" :
-            (_searching
+        NSString *count = _detecting
+            ? (_apps.count ? @"上次检测结果 · 正在后台刷新" : @"正在检测…")
+            : (_searching
                 ? [NSString stringWithFormat:@"共 %lu 个应用 · %lu 项匹配",
                     (unsigned long)_apps.count, (unsigned long)_visibleApps.count]
                 : [NSString stringWithFormat:@"共 %lu 个应用 · 默认显示前 %lu 个",
@@ -732,7 +814,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
 
     if (indexPath.section == 0) {
         NSUInteger idx = (NSUInteger)indexPath.row;
-        if (_detecting) {
+        if (_detecting && !_apps.count) {
             cell.textLabel.text = @"正在读取已安装应用…";
             cell.detailTextLabel.text = @"首次读取名称数据库需要几秒";
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -769,6 +851,10 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
                 bid.length ? bid : @"标识未知",
                 exact ? @"Documents/DeltaForce/Saved" :
                     ([(NSString *)a[@"game"] length] ? @"标识匹配，仅供参考" : a[@"name"])];
+            NSUInteger configured = [_pathCounts[a[@"path"]] unsignedIntegerValue];
+            if (configured)
+                subtitle = [subtitle stringByAppendingFormat:@" · 已配置 %lu 条路径",
+                            (unsigned long)configured];
             WQGameEmphasize(cell.textLabel, title, tokens, WQFontBody(), WQColorText());
             WQGameEmphasize(cell.detailTextLabel, subtitle, tokens, WQFontCaption(), WQColorText2());
             cell.imageView.image = WQLinearIcon(exact ? @"checkmark.square" : @"app.dashed");
@@ -899,8 +985,19 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
                     inner->_paths = WQGameLoadPaths();
                     [inner recomputeVisible];
                     [inner.tableView reloadData];
-                    wq_alert(inner, @"已保存", [NSString stringWithFormat:@"新建 %lu 个目录\n%@\n\n可在下方「保存的注入路径」中放入 lua 等资源。",
-                                               (unsigned long)created, final]);
+                    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"已保存"
+                        message:[NSString stringWithFormat:@"新建 %lu 个目录\n%@\n\n现在可以放入 lua、pak、sig 等资源文件。",
+                                 (unsigned long)created, final]
+                        preferredStyle:UIAlertControllerStyleAlert];
+                    [done addAction:[UIAlertAction actionWithTitle:@"稍后" style:UIAlertActionStyleCancel handler:nil]];
+                    [done addAction:[UIAlertAction actionWithTitle:@"去放入资源" style:UIAlertActionStyleDefault
+                        handler:^(UIAlertAction *__unused z) {
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                [inner.navigationController pushViewController:
+                                    [[WQGameInjectViewController alloc] initWithEntry:entry] animated:YES];
+                            });
+                        }]];
+                    [inner presentViewController:done animated:YES completion:nil];
                 });
             });
         }]];
