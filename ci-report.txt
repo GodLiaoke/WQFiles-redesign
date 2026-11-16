@@ -1,5 +1,5 @@
-run_id=43901340143
-sdk=success tests=failure build=skipped
+run_id=43902227300
+sdk=success tests=success build=success
 --- xcode / sdk inventory ---
 == runner ==
 ProductName:		macOS
@@ -90,8 +90,8 @@ PASS: explicit small bound still supports successful empty enumeration
 PASS: overflowing scan bound is rejected before work dispatch
 
 == WQAccessTreeTests ==
+PASS: race preserves whichever destination wins exclusion
 PASS: write temp sentinel
-PASS: write racing creator
 PASS: race preserves whichever destination wins exclusion
 
 == WQAccessMeasureTests ==
@@ -105,8 +105,8 @@ PASS: tree copy preserves symlink item without following it
 PASS: copied symlink remains a symlink
 
 == WQAppsCopyTests ==
-2026-11-16 15:53:54.256 WQAppsCopyTests[1471:6901] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-3B15D00B-6185-4C57-AD3D-B805781E63C5/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-3B15D00B-6185-4C57-AD3D-B805781E63C5/dst (3 items) OK
-2026-11-16 15:53:54.257 WQAppsCopyTests[1471:6901] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-3B15D00B-6185-4C57-AD3D-B805781E63C5/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-3B15D00B-6185-4C57-AD3D-B805781E63C5/empty-dst (0 items) OK
+2026-11-16 15:58:31.206 WQAppsCopyTests[1499:6918] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-97212969-3903-4F80-B192-79F223723365/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-97212969-3903-4F80-B192-79F223723365/dst (3 items) OK
+2026-11-16 15:58:31.209 WQAppsCopyTests[1499:6918] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-97212969-3903-4F80-B192-79F223723365/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-97212969-3903-4F80-B192-79F223723365/empty-dst (0 items) OK
 All Apps copy regression tests passed.
 
 == WQAppsSupportTests ==
@@ -126,20 +126,16 @@ All LaunchServices regression tests passed.
 == Python release and static UI checks ==
 
 ----------------------------------------------------------------------
-Ran 16 tests in 1.328s
+Ran 16 tests in 0.720s
 
 OK
 browser UI regression checks: PASS
 
 == Strict iOS arm64 syntax/link checks ==
-WQExtras.m:711:11: error: object of type 'NSArray *' is not compatible with array element type 'NSString *' [-Werror,-Wobjc-literal-conversion]
-  711 |         @[@[@"作者", @"by 淮季"],
-      |           ^~~~~~~~~~~~~~~~~~~~~~
-WQExtras.m:712:11: error: object of type 'NSArray *' is not compatible with array element type 'NSString *' [-Werror,-Wobjc-literal-conversion]
-  712 |           @[@"频道", @"公益频道@HeiMaoClub"]],
-      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-WQExtras.m:720:26: error: incompatible pointer types initializing 'NSArray<NSString *> *' with an expression of type 'NSString *' [-Werror,-Wincompatible-pointer-types]
-  720 |     NSArray<NSString *> *pair = rows[indexPath.section][indexPath.row];
-      |                          ^      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-3 errors generated.
+iOS syntax and link checks: PASS
+Info.plist: OK
+entitlements.plist: OK
+
+All requested regression suites passed. Logs retained in: /Users/runner/work/WQFiles-redesign/WQFiles-redesign/.work/tests/all.5FhvoX
 --- build (tail) ---
+wrote /Users/runner/work/WQFiles-redesign/WQFiles-redesign/WQFiles.ipa
