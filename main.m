@@ -2260,16 +2260,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
 
 #pragma mark - Root
 
-// The single primary entry is a floating glass panel. It sits in the control
-// layer (it navigates), so glass is appropriate here; content rows stay flat.
-
-static UIView *WQRootGameBackground(void)
-{
-    // Returning a plain colour keeps the primary row a normal single-line row.
-    UIView *outer = [UIView new];
-    outer.backgroundColor = WQColorSurface();
-    return outer;
-}
+// The primary entry is a normal single-line row; no floating card or panel.
 @interface WQRootViewController : UITableViewController
 @end
 

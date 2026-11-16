@@ -122,4 +122,6 @@ for name in ("main.m", "WQExtras.m", "WQGameFeatures.m"):
 forbid(main, "CGRectMake(0, 0, 320", "no fixed-width footer")
 forbid(game, "CGRectMake(0, 0, 360", "no fixed-width header")
 
+forbid(main, "WQRootGameBackground", "no unused root background helper")
+
 print("browser UI regression checks: PASS")
