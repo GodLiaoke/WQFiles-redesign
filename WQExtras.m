@@ -702,7 +702,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     NSDictionary *info = NSBundle.mainBundle.infoDictionary;
     NSString *group = wq_app_group() ?: @"No App Group";
     NSOperatingSystemVersion v = NSProcessInfo.processInfo.operatingSystemVersion;
-    NSArray<NSArray<NSString *> *> *rows = @[
+    NSArray<NSArray *> *rows = @[
         @[@[@"名称", @"黑猫游戏工具箱"],
           @[@"版本", [NSString stringWithFormat:@"%@ (%@)", info[@"CFBundleShortVersionString"] ?: @"?",
                                                   info[@"CFBundleVersion"] ?: @"?"]],
