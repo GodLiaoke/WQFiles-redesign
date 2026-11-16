@@ -57,6 +57,17 @@
 
 「显示全部应用数据」「删除非空目录」「兼容模式」存于 `NSUserDefaults`。
 
+> **白屏回归修复**：初版用 `+load` 交换 `layoutSubviews` 给所有单元格装玻璃。
+> `class_getInstanceMethod(UITableViewCell, @selector(layoutSubviews))` 会沿继承链
+> 取到 `UIView` 的实现，交换后 **UIWindow 及所有视图** 的布局都进了分类方法，
+> `makeKeyAndVisible` 首次布局即抛异常，表现为纯白屏。现改为：只交换
+> `UITableViewCell` 自己声明的 `initWithStyle:reuseIdentifier:`（不会碰 UIView
+> 方法表）、在 `didFinishLaunching` 而非 `+load` 安装、对返回对象做类型判断、
+> 「全局行玻璃」默认关闭且由设置显式开启、所有系统材质调用 `@try/@catch`
+> 并在异常时持久化平面模式。另修复 `WQGlassCellPanel` 自身 tag 与玻璃子视图
+> 相同导致 `viewWithTag:` 返回自己、玻璃未插入的问题。静态回归已加断言，
+> 禁止再次出现 `layoutSubviews` swizzle。
+
 ## 全局液态玻璃、自适应与品牌
 
 - **全局玻璃**：`WQAppearance.m` 在运行时给每个 `UITableViewCell` 幂等安装玻璃

@@ -13,25 +13,32 @@ NSString *const WQAppearanceDidChangeNotification = @"WQAppearanceDidChangeNotif
 
 void WQStyleCell(UITableViewCell *cell)
 {
-    if (!cell) return;
-    cell.backgroundColor = UIColor.clearColor;
-    cell.contentView.backgroundColor = UIColor.clearColor;
-    if ([cell respondsToSelector:@selector(setBackgroundConfiguration:)])
-        cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
+    // Hard type guard: this must never receive a UIView/UIWindow.
+    if (![cell isKindOfClass:UITableViewCell.class]) return;
+    @try {
+        cell.backgroundColor = UIColor.clearColor;
+        cell.contentView.backgroundColor = UIColor.clearColor;
+        if ([cell respondsToSelector:@selector(setBackgroundConfiguration:)])
+            cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 
-    UIView *existing = cell.backgroundView;
-    if (existing) {
-        // Ours is already installed, or the screen has a deliberate custom
-        // background. Never replace a custom one.
-        if (existing.tag == WQGlassBackgroundTag) {
-            cell.textLabel.adjustsFontForContentSizeCategory = YES;
-            cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
+        UIView *existing = cell.backgroundView;
+        if (existing) {
+            // Ours is already installed, or the screen has a deliberate custom
+            // background. Never replace a custom one.
+            if (existing.tag == WQGlassCellPanelTag || existing.tag == WQGlassBackgroundTag) {
+                cell.textLabel.adjustsFontForContentSizeCategory = YES;
+                cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
+            }
+            return;
         }
-        return;
+        cell.backgroundView = WQGlassCellPanel(WQRadius3);
+        cell.textLabel.adjustsFontForContentSizeCategory = YES;
+        cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
+    } @catch (NSException *__unused exception) {
+        // Any cell-styling failure degrades to plain UIKit, not a blank screen.
+        [NSUserDefaults.standardUserDefaults setBool:NO forKey:WQGlassRowsEnabledKey];
+        cell.backgroundView = nil;
     }
-    cell.backgroundView = WQGlassCellPanel(WQRadius3);
-    cell.textLabel.adjustsFontForContentSizeCategory = YES;
-    cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
 }
 
 void WQStyleTableView(UITableView *tableView)
@@ -97,26 +104,61 @@ void WQApplyAppearanceMode(void)
     }
 }
 
+// Swizzle ONLY initWithStyle:reuseIdentifier:, which UITableViewCell declares
+// itself. class_getInstanceMethod therefore returns a Method owned by
+// UITableViewCell, never UIView's layoutSubviews. Swizzling layoutSubviews
+// here was the white-screen bug: UIView's implementation got replaced for
+// every view, so UIWindow's first layout raised an exception.
+static void WQInstallCellGlass(void)
+{
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        Class cls = UITableViewCell.class;
+        SEL originalSEL = @selector(initWithStyle:reuseIdentifier:);
+        SEL hookSEL = @selector(wq_appearance_initWithStyle:reuseIdentifier:);
+        Method original = class_getInstanceMethod(cls, originalSEL);
+        Method hook = class_getInstanceMethod(cls, hookSEL);
+        if (original && hook && original != hook)
+            method_exchangeImplementations(original, hook);
+    });
+}
+
 void WQApplyGlobalAppearance(void)
 {
-    // System bars keep their native Liquid Glass; only colours are unified.
-    UINavigationBar.appearance.tintColor = WQColorText();
-    UIToolbar.appearance.tintColor = WQColorText();
-    UISearchBar.appearance.tintColor = WQColorText();
-    UISwitch.appearance.onTintColor = WQColorStrong();
+    @try {
+        // System bars keep their native Liquid Glass; only colours are unified.
+        UINavigationBar.appearance.tintColor = WQColorText();
+        UIToolbar.appearance.tintColor = WQColorText();
+        UISearchBar.appearance.tintColor = WQColorText();
+        UISwitch.appearance.onTintColor = WQColorStrong();
+        WQInstallCellGlass();
+        // Probe once at launch. If the device's material throws, the guarded
+        // factory persists flat mode and every later call becomes a no-op.
+        (void)WQGlassEffect(NO);
+    } @catch (NSException *__unused exception) {
+        NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+        [d setBool:NO forKey:WQGlassEnabledKey];
+        [d setBool:NO forKey:WQGlassRowsEnabledKey];
+    }
 }
 
 #pragma mark - Runtime adaptation
 
 void WQRefreshAllWindows(void)
 {
-    UIApplication *app = UIApplication.sharedApplication;
-    for (UIScene *scene in app.connectedScenes) {
-        if (![scene isKindOfClass:UIWindowScene.class]) continue;
-        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-            WQGlassRefreshIn(window);
-            [window setNeedsLayout];
+    @try {
+        UIApplication *app = UIApplication.sharedApplication;
+        for (UIScene *scene in app.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+            for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+                WQGlassRefreshIn(window);
+                [window setNeedsLayout];
+            }
         }
+    } @catch (NSException *__unused exception) {
+        NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+        [d setBool:NO forKey:WQGlassEnabledKey];
+        [d setBool:NO forKey:WQGlassRowsEnabledKey];
     }
     [NSNotificationCenter.defaultCenter postNotificationName:WQAppearanceDidChangeNotification object:nil];
 }
@@ -137,28 +179,26 @@ void WQRegisterAppearanceNotifications(void)
     (void)transparencyObserver; (void)sizeObserver;   // retained for process lifetime
 }
 
-#pragma mark - Runtime cell styling
+#pragma mark - Safe runtime cell styling
 
-// One small, idempotent hook makes EVERY screen in the app use the same glass
-// rows, including modules that predate the redesign. Cells with their own
-// backgroundView are respected, and the switch in Settings disables it.
+// The hook is installed from didFinishLaunching (not +load), only swaps a
+// method UITableViewCell declares itself, checks the returned object's class,
+// and is gated by the opt-in switch. Any failure falls back to plain cells.
 @implementation UITableViewCell (WQAppearanceGlass)
 
-+ (void)load
+- (instancetype)wq_appearance_initWithStyle:(UITableViewCellStyle)style
+                            reuseIdentifier:(NSString *)identifier
 {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        Class cls = UITableViewCell.class;
-        Method original = class_getInstanceMethod(cls, @selector(layoutSubviews));
-        Method replacement = class_getInstanceMethod(cls, @selector(wq_appearance_layoutSubviews));
-        if (original && replacement) method_exchangeImplementations(original, replacement);
-    });
-}
-
-- (void)wq_appearance_layoutSubviews
-{
-    [self wq_appearance_layoutSubviews];   // swizzled: calls the original
-    if (WQGlassRowsEnabled()) WQStyleCell(self);
+    // After the exchange this calls the ORIGINAL initializer.
+    UITableViewCell *cell = [self wq_appearance_initWithStyle:style reuseIdentifier:identifier];
+    if (![cell isKindOfClass:UITableViewCell.class]) return cell;
+    @try {
+        if (WQGlassRowsEnabled()) WQStyleCell(cell);
+    } @catch (NSException *__unused exception) {
+        [NSUserDefaults.standardUserDefaults setBool:NO forKey:WQGlassRowsEnabledKey];
+        cell.backgroundView = nil;
+    }
+    return cell;
 }
 
 @end

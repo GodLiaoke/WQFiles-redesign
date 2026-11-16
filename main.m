@@ -1862,7 +1862,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
             @"全部应用数据会遍历整棵容器目录树。若 iOS 27.0 上系统数据打不开、或列表一直停在扫描，请开启兼容模式并彻底退出后重开：它会隐藏系统区域，改用 iOS 26 的授权方式与容器列表。切换后需重启才能完全生效。",
             @"快速目录读取用一次目录遍历拿到子文件夹，避免逐个子项授权；并行写入同时处理多个资源文件；检测缓存复用已解析的应用标识。列表缓存时长决定返回页面时是否重读目录。全部开关即时生效。",
             @"注入暂存是导入后、写入前的临时副本。正常写入会自动清理，异常退出可能留下残留。配置导入 / 导出只处理路径记录，不含资源文件；备份不会被这里的清理操作删除。",
-            @"液态玻璃全局应用于导航栏、控件与列表行。外观模式可覆盖浅色/深色；系统动态色自动适配高对比；开启「降低透明度」时自动降级为平面中性色；字号与行高跟随系统文本大小。关闭玻璃或全局行玻璃后改用平面材质，圆角与间距仍由设计变量固定。",
+            @"液态玻璃全局应用于导航栏、控件与列表行。外观模式可覆盖浅色/深色；系统动态色自动适配高对比；开启「降低透明度」时自动降级为平面中性色；字号与行高跟随系统文本大小。「全局行玻璃」默认关闭，开启后对新建表格行应用系统玻璃；材质创建异常时会自动回退平面，不会中断启动。关闭玻璃后改用平面材质，圆角与间距仍由设计变量固定。",
             @"递归删除会清空目录内容，且不逐份保留备份。覆盖与保存校验由访问层固定开启，不提供关闭。",
             @"以下操作不可撤销。清空路径只移除本应用保存的记录，不会删除游戏目录里的文件；重置设置会恢复全部开关默认值，但保留备份与注入路径。",
         ];
@@ -2785,9 +2785,16 @@ static void wq_full_scan_progress(int64_t done, int64_t total, BOOL finished)
 didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions
 {
     (void)application; (void)launchOptions;
-    WQApplyGlobalAppearance();
-    WQApplyAppearanceMode();
-    WQRegisterAppearanceNotifications();
+    @try {
+        WQApplyGlobalAppearance();
+        WQApplyAppearanceMode();
+        WQRegisterAppearanceNotifications();
+    } @catch (NSException *__unused exception) {
+        // Never let appearance setup stop the window from being created.
+        NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+        [d setBool:NO forKey:WQGlassEnabledKey];
+        [d setBool:NO forKey:WQGlassRowsEnabledKey];
+    }
     return YES;
 }
 

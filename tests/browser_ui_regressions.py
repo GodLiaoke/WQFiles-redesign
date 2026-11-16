@@ -66,4 +66,12 @@ require(sharing, "actionWithTitle:@\"取消\"", "folder share cancel action")
 clear_preparation = sharing.split("static void wq_clear_preparation", 1)[1].split("static BOOL wq_present_share", 1)[0]
 require(clear_preparation, "if (!host) return;", "nil weak host association guard")
 
+appearance = (ROOT / "WQAppearance.m").read_text()
+glass = (ROOT / "WQGlass.h").read_text()
+forbid(appearance, "@selector(layoutSubviews)", "unsafe layoutSubviews swizzle")
+require(appearance, "initWithStyle:reuseIdentifier:", "safe cell init hook")
+require(appearance, "isKindOfClass:UITableViewCell.class", "cell type guard")
+require(glass, "WQGlassCellPanelTag", "distinct cell panel tag")
+require(glass, "@catch", "guarded system material")
+
 print("browser UI regression checks: PASS")
