@@ -1862,7 +1862,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
             @"全部应用数据会遍历整棵容器目录树。若 iOS 27.0 上系统数据打不开、或列表一直停在扫描，请开启兼容模式并彻底退出后重开：它会隐藏系统区域，改用 iOS 26 的授权方式与容器列表。切换后需重启才能完全生效。",
             @"快速目录读取用一次目录遍历拿到子文件夹，避免逐个子项授权；并行写入同时处理多个资源文件；检测缓存复用已解析的应用标识。列表缓存时长决定返回页面时是否重读目录。全部开关即时生效。",
             @"注入暂存是导入后、写入前的临时副本。正常写入会自动清理，异常退出可能留下残留。配置导入 / 导出只处理路径记录，不含资源文件；备份不会被这里的清理操作删除。",
-            @"液态玻璃全局应用于导航栏、控件与列表行。外观模式可覆盖浅色/深色；系统动态色自动适配高对比；开启「降低透明度」时自动降级为平面中性色；字号与行高跟随系统文本大小。「全局行玻璃」默认关闭，开启后对新建表格行应用系统玻璃；材质创建异常时会自动回退平面，不会中断启动。关闭玻璃后改用平面材质，圆角与间距仍由设计变量固定。",
+            @"固定浅色中性色，靠明暗对比区分层级。间距与圆角走固定档位，字号与行高固定，不随系统文本大小缩放，列表行因此不会互相挤压。无渐变、无发光、无材质、无装饰徽章。",
             @"递归删除会清空目录内容，且不逐份保留备份。覆盖与保存校验由访问层固定开启，不提供关闭。",
             @"以下操作不可撤销。清空路径只移除本应用保存的记录，不会删除游戏目录里的文件；重置设置会恢复全部开关默认值，但保留备份与注入路径。",
         ];
@@ -1881,11 +1881,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
               WQActionRow(@"清除检测缓存", @"清除", WQSettingActionClearCache),
               WQActionRow(@"打开备份", @"打开", WQSettingActionOpenBackups),
               WQActionRow(@"配置导入 / 导出", @"打开", WQSettingActionOpenConfig)],
-            @[WQDynamicRow(@"材质", @"glassState"),
-              WQTapRow(@"外观模式", @"appearanceMode"),
-              WQDynamicRow(@"当前状态", @"appearanceState"),
-              WQSwitchRow(@"液态玻璃材质", WQGlassEnabledKey),
-              WQSwitchRow(@"全局行玻璃", WQGlassRowsEnabledKey),
+            @[WQValueRow(@"材质", @"平面中性"),
+              WQValueRow(@"外观", @"浅色"),
               WQActionRow(@"关于", @"打开", WQSettingActionOpenAbout),
               WQValueRow(@"图标", @"线性"),
               WQValueRow(@"圆角", @"8 / 20 点"),
@@ -1923,11 +1920,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
         return wq_legacy_scope() ? @"兼容模式"
             : (wq_system_areas_reachable() ? @"iOS 27 原生" : @"iOS 26 方式");
     if ([key isEqualToString:@"reloadAge"]) return WQSettingReloadAgeText();
-    if ([key isEqualToString:@"glassState"])
-        return !WQGlassEnabled() ? @"平面中性"
-            : (WQGlassClassAvailable() ? @"系统液态玻璃" : @"系统材质（降级）");
-    if ([key isEqualToString:@"appearanceMode"]) return WQAppearanceModeText();
-    if ([key isEqualToString:@"appearanceState"]) return WQAppearanceStateText();
+    if ([key isEqualToString:@"glassState"]) return @"平面中性";
     if ([key isEqualToString:@"staging"]) {
         NSUInteger n = WQGameStagingFileCount();
         return n ? [NSString stringWithFormat:@"%lu 个文件 · %@", (unsigned long)n,
@@ -1980,9 +1973,7 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
                           [row.key isEqualToString:WQSettingFastDirKey] ||
                           [row.key isEqualToString:WQSettingParallelWriteKey] ||
                           [row.key isEqualToString:WQSettingDetectCacheKey];
-        control.on = [row.key isEqualToString:WQGlassEnabledKey] ? WQGlassEnabled()
-            : ([row.key isEqualToString:WQGlassRowsEnabledKey] ? WQGlassRowsEnabled()
-               : WQSettingBool(row.key, defaultsOn));
+        control.on = WQSettingBool(row.key, defaultsOn);
         control.onTintColor = WQColorStrong();
         control.tag = indexPath.section * 100 + indexPath.row;
         [control addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
@@ -2017,14 +2008,6 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     WQSettingRow *row = _rows[indexPath.section][indexPath.row];
     if (!row.tappable) return;
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    if ([row.key isEqualToString:@"appearanceMode"]) {
-        NSInteger mode = [defaults integerForKey:WQSettingAppearanceModeKey];
-        [defaults setInteger:(mode + 1) % 3 forKey:WQSettingAppearanceModeKey];
-        WQApplyAppearanceMode();
-        WQRefreshAllWindows();
-        [self.tableView reloadData];
-        return;
-    }
     NSInteger idx = [defaults integerForKey:WQSettingReloadAgeIdxKey];
     [defaults setInteger:(idx + 1) % 3 forKey:WQSettingReloadAgeIdxKey];
     [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
@@ -2042,12 +2025,6 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     // a restart, which the group footer states.
     if ([row.key isEqualToString:WQSettingLegacyScopeKey]) wq_set_legacy_scope(sender.on);
     if ([row.key isEqualToString:WQSettingDetectCacheKey] && !sender.on) WQGameClearDetectionCache();
-    if ([row.key isEqualToString:WQGlassEnabledKey] ||
-        [row.key isEqualToString:WQGlassRowsEnabledKey]) {
-        WQRefreshAllWindows();
-        [self.tableView reloadData];
-        wq_alert(self, @"材质已切换", @"已刷新全部页面；系统开启「降低透明度」时会自动使用平面材质。");
-    }
     if ([row.key isEqualToString:WQSettingCompactRowsKey]) [self.tableView reloadData];
     wq_log(@"settings: %@ = %d", row.key, sender.on ? 1 : 0);
 }
@@ -2285,22 +2262,14 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
 
 // The single primary entry is a floating glass panel. It sits in the control
 // layer (it navigates), so glass is appropriate here; content rows stay flat.
+
 static UIView *WQRootGameBackground(void)
 {
+    // Returning a plain colour keeps the primary row a normal single-line row.
     UIView *outer = [UIView new];
-    outer.backgroundColor = UIColor.clearColor;
-    UIView *panel = WQGlassPanel(WQRadius4);
-    [outer addSubview:panel];
-    panel.translatesAutoresizingMaskIntoConstraints = NO;
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.leadingAnchor constraintEqualToAnchor:outer.leadingAnchor constant:WQGutter],
-        [panel.trailingAnchor constraintEqualToAnchor:outer.trailingAnchor constant:-WQGutter],
-        [panel.topAnchor constraintEqualToAnchor:outer.topAnchor constant:WQSpace2],
-        [panel.bottomAnchor constraintEqualToAnchor:outer.bottomAnchor constant:-WQSpace2],
-    ]];
+    outer.backgroundColor = WQColorSurface();
     return outer;
 }
-
 @interface WQRootViewController : UITableViewController
 @end
 
@@ -2393,7 +2362,8 @@ static UIView *WQRootGameBackground(void)
 // Plain left-aligned credits: no capsule buttons, badges or decorative links.
 - (UIView *)authorFooter
 {
-    UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 72)];
+    UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, UIScreen.mainScreen.bounds.size.width, 72)];
+    footer.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     UILabel *by = [UILabel new];
     NSDictionary *info = NSBundle.mainBundle.infoDictionary;
     by.text = [NSString stringWithFormat:@"黑猫游戏工具箱 %@ (%@) · GPL-3.0-or-later",
@@ -2471,8 +2441,8 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
         c.image = WQLinearIcon(@"gamecontroller");
         c.imageProperties.maximumSize = CGSizeMake(28.0, 28.0);
         c.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(WQSpace4, WQSpace6, WQSpace4, WQSpace3);
-        cell.backgroundView = WQRootGameBackground();
-        cell.backgroundColor = UIColor.clearColor;
+        cell.backgroundView = nil;
+        cell.backgroundColor = WQColorSurface();
         UILabel *enter = [UILabel new];
         enter.text = @"进入";
         enter.font = WQFontValue();
@@ -2590,6 +2560,9 @@ void WQOpenPathFromExtras(UINavigationController *nav, NSString *path)
     // saved compatibility mode so the very first grant uses its query flags.
     wq_set_legacy_scope([NSUserDefaults.standardUserDefaults boolForKey:WQSettingLegacyScopeKey]);
     UIWindow *window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+    // The design tokens are fixed light neutral colours. Force light here so
+    // system bars, alerts and keyboards match them even in system Dark Mode.
+    window.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
     window.rootViewController = [[WQNavigationController alloc] initWithRootViewController:[WQRootViewController new]];
     [window makeKeyAndVisible];
     self.window = window;

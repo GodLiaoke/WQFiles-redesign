@@ -77,41 +77,35 @@ static UILabel *WQStatLabel(NSString *text, UIFont *font, UIColor *color)
 
 #pragma mark - Overview
 
+
 UIView *WQOverviewHeader(void)
 {
-    UIView *outer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 360, 124)];
+    // Plain two-line text, no rounded card, width follows the table view.
+    CGFloat width = UIScreen.mainScreen.bounds.size.width;
+    UIView *outer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 66)];
     outer.backgroundColor = UIColor.clearColor;
-    UIView *panel = WQGlassPanel(WQRadius4);
-    [outer addSubview:panel];
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.leadingAnchor constraintEqualToAnchor:outer.leadingAnchor constant:WQGutter],
-        [panel.trailingAnchor constraintEqualToAnchor:outer.trailingAnchor constant:-WQGutter],
-        [panel.topAnchor constraintEqualToAnchor:outer.topAnchor constant:WQSpace3],
-        [panel.bottomAnchor constraintEqualToAnchor:outer.bottomAnchor constant:-WQSpace3],
-    ]];
+    outer.autoresizingMask = UIViewAutoresizingFlexibleWidth;
 
     NSString *line1 = [NSString stringWithFormat:@"已保存路径 %lu  ·  收藏 %lu  ·  注入记录 %lu",
         (unsigned long)WQGameSavedPathCount(), (unsigned long)WQBookmarkCount(),
         (unsigned long)WQInjectionHistoryCount()];
-    NSString *line2 = [NSString stringWithFormat:@"暂存占用 %@  ·  %@",
-        wq_size_text(WQGameStagingBytes()), WQAppearanceModeText()];
-    UILabel *a = WQStatLabel(@"工作台", WQFontCaption(), WQColorText3());
-    UILabel *b = WQStatLabel(line1, WQFontHeadline(), WQColorText());
-    UILabel *c = WQStatLabel(line2, WQFontCaption(), WQColorText2());
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[a, b, c]];
+    NSString *line2 = [NSString stringWithFormat:@"暂存占用 %@  ·  平面中性",
+        wq_size_text(WQGameStagingBytes())];
+    UILabel *a = WQStatLabel(line1, WQFontValue(), WQColorText2());
+    UILabel *b = WQStatLabel(line2, WQFontCaption(), WQColorText3());
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[a, b]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.alignment = UIStackViewAlignmentLeading;
     stack.spacing = WQSpace1;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
-    [panel addSubview:stack];
+    [outer addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
-        [stack.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:WQSpace4],
-        [stack.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-WQSpace4],
-        [stack.centerYAnchor constraintEqualToAnchor:panel.centerYAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:outer.leadingAnchor constant:WQGutter],
+        [stack.trailingAnchor constraintEqualToAnchor:outer.trailingAnchor constant:-WQGutter],
+        [stack.centerYAnchor constraintEqualToAnchor:outer.centerYAnchor],
     ]];
     return outer;
 }
-
 #pragma mark - Bookmark store
 
 NSUInteger WQBookmarkCount(void) { return WQLoadArray(WQBookmarksKey).count; }
@@ -216,7 +210,7 @@ void WQBookmarkImportEntries(NSArray<NSDictionary *> *entries)
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return WQRowHeight + 12.0;
+    return 72.0;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -368,7 +362,7 @@ void WQRecordInjection(NSDictionary *record)
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return WQRowHeight + 12.0;
+    return 76.0;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
@@ -452,7 +446,7 @@ void WQRecordInjection(NSDictionary *record)
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return WQRowHeight;
+    return 56.0;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
@@ -569,7 +563,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return WQRowHeight;
+    return 52.0;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
@@ -693,7 +687,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return WQRowHeight;
+    return 56.0;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {

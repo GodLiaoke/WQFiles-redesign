@@ -27,6 +27,7 @@ static NSString *const WQGameRiskNote =
 @interface WQLogViewController : UIViewController
 @end
 
+
 @interface WQGamePathPickerViewController : UITableViewController <UITextFieldDelegate>
 - (instancetype)initWithGame:(NSString *)game container:(NSString *)container
                     relative:(NSString *)relative suggest:(NSString *)suggest;
@@ -50,8 +51,11 @@ static NSString *const WQGameExactMark = @"Documents/DeltaForce/Saved";
 static NSString *const WQGameExactChain =
     @"Documents/DeltaForce/Saved/LuaDebug/LuaSource/DFM/BusinessEntrance";
 static NSString *const WQGameExactName = @"三角洲行动";
+static NSString *const WQGameLuaDebugChain = @"Documents/DeltaForce/Saved/LuaDebug";
 static NSString *const WQGameLuaThirdPartyURL = @"https://ios.ouovo.cc/dl/EntranceFlow.lua";
 static NSString *const WQGameLuaThirdPartyName = @"EntranceFlow.lua";
+static NSString *const WQGameLuaThirdPartyNote =
+    @"第三方版为淮季在社区中寻找到较为稳定的lua 并不是黑猫社区官方版！";
 static NSString *const WQGameLuaOfficialNotice =
     @"官方版正在开发完善防封机制中 请等待版本迭代";
 static const unsigned long long WQGameLuaMaxBytes = 20ULL * 1024ULL * 1024ULL;
@@ -511,26 +515,21 @@ static CGFloat WQGameFormHeight(void)
     return WQSpace3 + 18.0 + WQSpace2 + WQControlH + WQSpace1 + WQHintSpace + WQSpace3;
 }
 
-// A prominent, functional glass panel at the very top of the game page.
-// Credit is part of the chrome, so glass is appropriate; it is plain neutral
-// text, never a badge, capsule or coloured emblem.
+// Plain left-aligned credit text at the top of the game page. No card, no
+// badge, no capsule, no coloured emblem; width follows the table view.
+
 static UIView *WQGameCreditHeader(void)
 {
-    UIView *outer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 360, 126)];
+    // Pure text header. A fixed 360pt frame and a rounded panel caused the
+    // credit block to sit off-centre on narrow and wide screens.
+    CGFloat width = UIScreen.mainScreen.bounds.size.width;
+    UIView *outer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 76)];
     outer.backgroundColor = UIColor.clearColor;
-
-    UIView *panel = WQGlassPanel(WQRadius4);
-    [outer addSubview:panel];
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.leadingAnchor constraintEqualToAnchor:outer.leadingAnchor constant:WQGutter],
-        [panel.trailingAnchor constraintEqualToAnchor:outer.trailingAnchor constant:-WQGutter],
-        [panel.topAnchor constraintEqualToAnchor:outer.topAnchor constant:WQSpace3],
-        [panel.bottomAnchor constraintEqualToAnchor:outer.bottomAnchor constant:-WQSpace3],
-    ]];
+    outer.autoresizingMask = UIViewAutoresizingFlexibleWidth;
 
     UILabel *by = [UILabel new];
     by.text = @"by 淮季";
-    by.font = WQFontTitle();
+    by.font = WQFontHeadline();
     by.textColor = WQColorText();
     by.textAlignment = NSTextAlignmentLeft;
     UILabel *channel = [UILabel new];
@@ -538,26 +537,19 @@ static UIView *WQGameCreditHeader(void)
     channel.font = WQFontBody();
     channel.textColor = WQColorText2();
     channel.textAlignment = NSTextAlignmentLeft;
-    UILabel *note = [UILabel new];
-    note.text = @"游戏资源注入 · 本机调试与补齐缺失资源";
-    note.font = WQFontCaption();
-    note.textColor = WQColorText3();
-    note.textAlignment = NSTextAlignmentLeft;
-
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[by, channel, note]];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[by, channel]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.alignment = UIStackViewAlignmentLeading;
     stack.spacing = WQSpace1;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
-    [panel addSubview:stack];
+    [outer addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
-        [stack.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:WQSpace4],
-        [stack.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-WQSpace4],
-        [stack.centerYAnchor constraintEqualToAnchor:panel.centerYAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:outer.leadingAnchor constant:WQGutter],
+        [stack.trailingAnchor constraintEqualToAnchor:outer.trailingAnchor constant:-WQGutter],
+        [stack.centerYAnchor constraintEqualToAnchor:outer.centerYAnchor],
     ]];
     return outer;
 }
-
 #pragma mark - Search helpers
 
 // How many app containers the list shows before the user expands it. Searching
@@ -791,11 +783,18 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     });
 }
 
+- (NSDictionary *)wq_exactApp
+{
+    for (NSDictionary *a in _apps)
+        if ([a[@"exact"] boolValue]) return a;
+    return nil;
+}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    if (section == 2) return 3;   // 快捷操作
+    if (section == 2) return ([self wq_exactApp] ? 2 : 0) + 3;
     if (section == 1) return (NSInteger)_visiblePaths.count + 1;   // + add-path row
     if (_detecting && !_apps.count) return 1;
     if (!_apps.count) return 3;   // status + 查看日志 + 手动填写
@@ -830,13 +829,15 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
         NSString *how = @"搜索支持名称、应用标识、容器 UUID 与完整路径；多个关键词用空格分隔，完全相等的结果排最前。搜索时不限 5 个，点「显示全部」可展开完整列表。";
         return [NSString stringWithFormat:@"%@。%@\n\n三角洲行动按已验证的特征目录识别；其余游戏只按应用标识排序推荐，不猜测资源目录。长按任意行可复制容器路径。", count, how];
     }
-    if (section == 2) return @"与工作台共用同一套玻璃材质与线性图标；记录、校验与配置都不改动游戏文件。";
+    if (section == 2) return @"三角洲行动的两个动作各占一行，标签居左、箭头居右；记录、校验与配置都不改动游戏文件。";
     return @"搜索会同时过滤已保存路径。点按快捷放入资源文件，长按可复制完整路径；左滑只删除本应用的记录，不删除游戏里的文件。";
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return WQGameRowH();
+    // Two-line subtitles need real space; 44pt clipped the second line into
+    // the next row on every device.
+    return WQSettingGet(WQSettingCompactRowsKey, NO) ? 52.0 : 60.0;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -847,13 +848,25 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     NSArray<NSString *> *tokens = _queryTokens;
 
     if (indexPath.section == 2) {
+        NSUInteger prefix = [self wq_exactApp] ? 2 : 0;
+        NSUInteger row = (NSUInteger)indexPath.row;
+        if (row < prefix) {
+            cell.textLabel.text = row == 0 ? @"一键部署默认路径" : @"注入 Lua";
+            cell.detailTextLabel.text = row == 0
+                ? @"逐级检测并创建 LuaDebug 目录链，保存为注入路径"
+                : @"自定义 / 官方版 / 第三方版三种方式";
+            cell.imageView.image = WQLinearIcon(row == 0 ? @"folder" : @"chevron.left.forwardslash.chevron.right");
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            return cell;
+        }
+        NSUInteger idx = row - prefix;
         NSArray *titles = @[@"注入记录", @"文件校验", @"配置导入 / 导出"];
         NSArray *subtitles = @[@"查看最近写入结果，最多 200 条", @"流式计算 SHA-256 与文件大小",
                                @"导出或合并注入路径与路径收藏"];
         NSArray *icons = @[@"clock", @"number", @"arrow.up.arrow.down"];
-        cell.textLabel.text = titles[(NSUInteger)indexPath.row];
-        cell.detailTextLabel.text = subtitles[(NSUInteger)indexPath.row];
-        cell.imageView.image = WQLinearIcon(icons[(NSUInteger)indexPath.row]);
+        cell.textLabel.text = titles[idx];
+        cell.detailTextLabel.text = subtitles[idx];
+        cell.imageView.image = WQLinearIcon(icons[idx]);
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return cell;
     }
@@ -904,35 +917,10 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
             WQGameEmphasize(cell.textLabel, title, tokens, WQFontBody(), WQColorText());
             WQGameEmphasize(cell.detailTextLabel, subtitle, tokens, WQFontCaption(), WQColorText2());
             cell.imageView.image = WQLinearIcon(exact ? @"checkmark.square" : @"app.dashed");
-            if (exact) {
-                UIButton *deploy = [UIButton buttonWithType:UIButtonTypeSystem];
-                [deploy setTitle:@"一键部署" forState:UIControlStateNormal];
-                WQStylePrimaryButton(deploy);
-                deploy.titleLabel.font = WQFontValue();
-                deploy.tag = (NSInteger)idx;
-                [deploy addTarget:self action:@selector(quickDeployTapped:)
-                 forControlEvents:UIControlEventTouchUpInside];
-
-                UIButton *lua = [UIButton buttonWithType:UIButtonTypeSystem];
-                [lua setTitle:@"注入 Lua" forState:UIControlStateNormal];
-                WQStyleControl(lua);
-                [lua setTitleColor:WQColorText() forState:UIControlStateNormal];
-                lua.titleLabel.font = WQFontValue();
-                lua.tag = (NSInteger)idx;
-                [lua addTarget:self action:@selector(luaInjectedTapped:)
-                 forControlEvents:UIControlEventTouchUpInside];
-
-                UIStackView *actions = [[UIStackView alloc] initWithFrame:CGRectMake(0, 0, 200, 30)];
-                actions.axis = UILayoutConstraintAxisHorizontal;
-                actions.alignment = UIStackViewAlignmentFill;
-                actions.distribution = UIStackViewDistributionFillEqually;
-                actions.spacing = WQSpace1;
-                [actions addArrangedSubview:deploy];
-                [actions addArrangedSubview:lua];
-                cell.accessoryView = actions;
-            } else {
-                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            }
+            // No wide accessoryView: a 200pt two-button stack squeezed the
+            // title/subtitle on narrow screens. Both actions now live as their
+            // own single-line rows in the "快捷操作" section below.
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
     } else {
         NSUInteger idx = (NSUInteger)indexPath.row;
@@ -980,9 +968,17 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 2) {
         [self.view endEditing:YES];
+        NSUInteger prefix = [self wq_exactApp] ? 2 : 0;
+        NSUInteger row = (NSUInteger)indexPath.row;
+        if (row < prefix) {
+            if (row == 0) [self quickDeployTapped:nil];
+            else [self luaInjectedTapped:nil];
+            return;
+        }
+        NSUInteger idx = row - prefix;
         UIViewController *vc = nil;
-        if (indexPath.row == 0) vc = [WQInjectionHistoryViewController new];
-        else if (indexPath.row == 1) vc = [WQFileInspectorViewController new];
+        if (idx == 0) vc = [WQInjectionHistoryViewController new];
+        else if (idx == 1) vc = [WQFileInspectorViewController new];
         else vc = [WQConfigViewController new];
         [self.navigationController pushViewController:vc animated:YES];
         return;
@@ -1027,9 +1023,9 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
 
 - (void)quickDeployTapped:(UIButton *)sender
 {
-    if ((NSUInteger)sender.tag >= _visibleApps.count) return;
-    NSDictionary *a = _visibleApps[(NSUInteger)sender.tag];
-    if (![a[@"exact"] boolValue]) return;
+    (void)sender;
+    NSDictionary *a = [self wq_exactApp];
+    if (!a) { wq_alert(self, @"未检测到", @"请先检测应用容器，或手动添加注入路径。"); return; }
     NSString *container = a[@"path"];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"一键部署默认路径"
         message:[NSString stringWithFormat:@"目标：\n%@/%@\n\n逐级检测目录，已存在保留、缺失才新建，并保存为注入路径。\n\n%@",
@@ -1086,9 +1082,9 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
 
 - (void)luaInjectedTapped:(UIButton *)sender
 {
-    if ((NSUInteger)sender.tag >= _visibleApps.count) return;
-    NSDictionary *a = _visibleApps[(NSUInteger)sender.tag];
-    if (![a[@"exact"] boolValue]) return;
+    (void)sender;
+    NSDictionary *a = [self wq_exactApp];
+    if (!a) { wq_alert(self, @"未检测到", @"请先检测应用容器，或手动添加注入路径。"); return; }
     [self.view endEditing:YES];
     WQGameLuaViewController *vc = [[WQGameLuaViewController alloc]
         initWithContainer:a[@"path"] relative:WQGameExactChain alias:@"默认注入路径"];
@@ -1753,9 +1749,33 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 // them hide, disguise, auto-run or defeat any integrity check: this is the same
 // plain file write used by the general resource importer, with an extra network
 // source and a development notice. The "official" option writes nothing.
+
+// Runs on the shared IO queue. wq_list / wq_stat obtain sandbox tokens
+// when needed, so this works on iOS 26 and iOS 27 alike.
+static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
+{
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray new];
+    for (NSString *name in wq_list(dir, nil) ?: @[]) {
+        if ([name isEqualToString:@"."] || [name isEqualToString:@".."] || !name.length) continue;
+        NSString *path = [dir stringByAppendingPathComponent:name];
+        struct stat st;
+        if (!wq_stat(path, &st)) continue;
+        [out addObject:@{@"name": name, @"path": path,
+                         @"dir": @(S_ISDIR(st.st_mode)),
+                         @"size": @((unsigned long long)st.st_size)}];
+    }
+    [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        BOOL da = [a[@"dir"] boolValue], db = [b[@"dir"] boolValue];
+        if (da != db) return da ? NSOrderedAscending : NSOrderedDescending;
+        return [a[@"name"] compare:b[@"name"] options:NSCaseInsensitiveSearch];
+    }];
+    return out;
+}
 @implementation WQGameLuaViewController {
-    NSString *_container, *_relative, *_target, *_alias, *_status;
+    NSString *_container, *_relative, *_target, *_alias, *_status, *_chainStatus, *_luaDebug;
+    NSArray<NSDictionary *> *_items;
     NSURLSession *_session;
+    BOOL _chainReady, _checked;
 }
 
 - (instancetype)initWithContainer:(NSString *)container relative:(NSString *)relative
@@ -1766,7 +1786,10 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
         _relative = relative ?: WQGameExactChain;
         _alias = alias ?: @"默认注入路径";
         _target = [_container stringByAppendingPathComponent:_relative];
+        _luaDebug = [_container stringByAppendingPathComponent:WQGameLuaDebugChain];
         _status = @"尚未注入";
+        _chainStatus = @"正在检测目录…";
+        _items = @[];
     }
     return self;
 }
@@ -1778,16 +1801,33 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     self.navigationController.navigationBar.prefersLargeTitles = NO;
     WQStyleTableView(self.tableView);
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    self.navigationItem.rightBarButtonItem =
+        [[UIBarButtonItem alloc] initWithTitle:@"刷新" style:UIBarButtonItemStylePlain
+                                        target:self action:@selector(refreshTapped)];
     NSURLSessionConfiguration *cfg = NSURLSessionConfiguration.defaultSessionConfiguration;
     cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
     _session = [NSURLSession sessionWithConfiguration:cfg];
 }
 
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    // First entry: check every directory in the chain and create only the
+    // missing levels. Returning from the file browser only refreshes the list.
+    if (!_checked) { _checked = YES; [self ensureChainAndRefresh]; }
+    else [self refreshItems];
+}
+
 - (void)setStatus:(NSString *)text
 {
     _status = text ?: @"";
-    NSIndexPath *row = [NSIndexPath indexPathForRow:1 inSection:2];
-    [self.tableView reloadRowsAtIndexPaths:@[row] withRowAnimation:UITableViewRowAnimationNone];
+    [self.tableView reloadData];
+}
+- (void)setChainStatus:(NSString *)text ready:(BOOL)ready
+{
+    _chainStatus = text ?: @"";
+    _chainReady = ready;
+    [self.tableView reloadData];
 }
 
 - (void)copyText:(NSString *)text
@@ -1796,23 +1836,82 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     self.navigationItem.prompt = @"已复制";
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        WQGameLuaViewController *s = weakSelf;
-        if (s && [s.navigationItem.prompt isEqualToString:@"已复制"]) s.navigationItem.prompt = nil;
+        WQGameLuaViewController *v = weakSelf;
+        if (v && [v.navigationItem.prompt isEqualToString:@"已复制"]) v.navigationItem.prompt = nil;
     });
 }
 
-#pragma mark Table
+#pragma mark - Directory chain: detect, create, list
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
+// Runs on the shared IO queue. wq_list / wq_stat already obtain sandbox tokens
+// when needed, so this works on iOS 26 and iOS 27 alike.
+- (void)ensureChainAndRefresh
+{
+    [self setChainStatus:@"正在检测目录…" ready:NO];
+    NSString *container = _container, *relative = _relative, *target = _target;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(wq_io(), ^{
+        NSString *error = nil;
+        NSUInteger created = 0;
+        NSString *final = WQGameEnsureChain(container, relative, &created, &error);
+        NSArray<NSDictionary *> *items = final ? WQLuaListItems(target) : @[];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            WQGameLuaViewController *v = weakSelf;
+            if (!v) return;
+            v->_items = items;
+            if (!final) {
+                [v setChainStatus:[@"创建失败：" stringByAppendingString:(error ?: @"未知错误")] ready:NO];
+                return;
+            }
+            [v setChainStatus:(created
+                ? [NSString stringWithFormat:@"已就绪 · 自动新建 %lu 层目录", (unsigned long)created]
+                : @"已就绪 · 全部目录已存在") ready:YES];
+            wq_log(@"game: lua chain ready, created %lu levels, %lu items",
+                   (unsigned long)created, (unsigned long)items.count);
+        });
+    });
+}
+
+- (void)refreshItems
+{
+    NSString *target = _target;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(wq_io(), ^{
+        NSArray<NSDictionary *> *items = WQLuaListItems(target);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            WQGameLuaViewController *v = weakSelf;
+            if (!v) return;
+            v->_items = items;
+            [v.tableView reloadData];
+        });
+    });
+}
+
+- (void)refreshTapped
+{
+    [self.view endEditing:YES];
+    [_session invalidateAndCancel];
+    _session = [NSURLSession sessionWithConfiguration:
+        NSURLSessionConfiguration.defaultSessionConfiguration];
+    [self ensureChainAndRefresh];
+    [self setStatus:@"已刷新目录"];
+}
+
+#pragma mark - Table
+
+- (NSArray<NSString *> *)sectionTitles
+{
+    return @[@"默认注入 Lua", @"目录状态", @"目录浏览", @"LuaDebug 内容", @"说明与状态", @"危险操作"];
+}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return (NSInteger)[self sectionTitles].count; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if (section == 0) return 3;
-    if (section == 1) return 1;
-    return 2;
-}
-- (NSArray<NSString *> *)sectionTitles
-{
-    return @[@"默认注入 Lua", @"目标路径", @"来源与状态"];
+    if (section == 1) return 2;
+    if (section == 2) return 2;
+    if (section == 3) return (NSInteger)_items.count + 1;   // + refresh row
+    if (section == 4) return 2;
+    return 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
@@ -1821,51 +1920,103 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     if (section == 0)
-        return @"自定义导入：从「文件」App 选择 lua，按原文件名写入。官方版：仅显示开发进度提示，不下载、不写入任何文件。第三方版：从下方公开链接下载 EntranceFlow.lua 并写入。三种方式共用同一目标目录与覆盖备份逻辑。";
+        return [NSString stringWithFormat:
+            @"自定义导入：从「文件」App 选择 lua，按原文件名写入。官方版：仅显示开发进度提示，不下载、不写入任何文件。第三方版：下载社区 lua 并写入。三种方式共用同一目标目录与覆盖备份逻辑。\n\n%@",
+            WQGameLuaThirdPartyNote];
     if (section == 1)
-        return @"若目标目录缺失，写入前会逐级检测并只创建缺失层级；已存在目录保持原样。点按可复制完整路径。";
-    return [NSString stringWithFormat:@"第三方来源：%@\n\n%@", WQGameLuaThirdPartyURL, WQGameRiskNote];
+        return @"进入本页时逐级检测 LuaDebug 目录链：已存在保留、缺失层级自动新建。点按路径可复制；点按状态行可重新检测。";
+    if (section == 2)
+        return @"跳转到共享文件浏览器，可直接查看、修改或删除 LuaDebug 任意层级的内容。";
+    if (section == 3)
+        return @"列出注入目录（LuaDebug/LuaSource/DFM/BusinessEntrance）中的文件与子目录。左滑可删除单条；删除文件会在「备份」保留副本，删除目录会连同内容一起移除。";
+    if (section == 4) return WQGameRiskNote;
+    return @"此操作只删除本机的 LuaDebug 目录，不改动游戏其他数据。删除后本页不会立刻重建，下次重新进入时会自动补建目录链。";
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (indexPath.section == 1) return WQRowHeight + 28.0;
-    return WQGameRowH();
+    if (indexPath.section == 0) return 60.0;   // two-line subtitles
+    if (indexPath.section == 1) return indexPath.row == 0 ? 60.0 : 92.0;   // status / 3-line path
+    if (indexPath.section == 2) return 56.0;
+    if (indexPath.section == 3) return 56.0;
+    if (indexPath.section == 4) return indexPath.row == 0 ? 76.0 : 60.0;
+    return 56.0;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     UITableViewCell *cell = WQGamePlainCell();
-    if (indexPath.section == 0) {
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.accessoryView = nil;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    NSUInteger row = (NSUInteger)indexPath.row;
+    NSUInteger section = (NSUInteger)indexPath.section;
+
+    if (section == 0) {
         NSArray<NSString *> *titles = @[@"自定义导入", @"官方版", @"第三方版"];
         NSArray<NSString *> *subs = @[
             @"从「文件」App 选择 lua，按原文件名写入",
             @"查看开发进度提示，不写入任何文件",
-            [NSString stringWithFormat:@"下载 %@ 并写入", WQGameLuaThirdPartyName],
+            @"写入社区寻找到的较稳定 lua",
         ];
         NSArray<NSString *> *icons = @[@"square.and.arrow.down", @"info.circle", @"arrow.down.circle"];
-        cell.textLabel.text = titles[(NSUInteger)indexPath.row];
-        cell.detailTextLabel.text = subs[(NSUInteger)indexPath.row];
-        cell.imageView.image = WQLinearIcon(icons[(NSUInteger)indexPath.row]);
+        cell.textLabel.text = titles[row];
+        cell.detailTextLabel.text = subs[row];
+        cell.imageView.image = WQLinearIcon(icons[row]);
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else if (indexPath.section == 1) {
-        cell.textLabel.text = _target;
-        cell.textLabel.font = WQFontValue();
-        cell.textLabel.numberOfLines = 3;
-        cell.detailTextLabel.text = @"点按复制完整路径";
-        cell.imageView.image = WQLinearIcon(@"folder");
-    } else {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"第三方来源";
-            cell.detailTextLabel.text = WQGameLuaThirdPartyURL;
-            cell.detailTextLabel.numberOfLines = 2;
-            cell.imageView.image = WQLinearIcon(@"link");
+    } else if (section == 1) {
+        if (row == 0) {
+            cell.textLabel.text = @"目录链";
+            cell.detailTextLabel.text = _chainStatus;
+            cell.imageView.image = WQLinearIcon(_chainReady ? @"checkmark.circle" : @"clock");
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            cell.textLabel.text = _target;
+            cell.textLabel.font = WQFontValue();
+            cell.textLabel.numberOfLines = 3;
+            cell.detailTextLabel.text = @"点按复制完整路径";
+            cell.imageView.image = WQLinearIcon(@"folder");
+        }
+    } else if (section == 2) {
+        cell.textLabel.text = row == 0 ? @"打开 LuaDebug 根目录" : @"打开注入目录";
+        cell.detailTextLabel.text = row == 0 ? _luaDebug : _target;
+        cell.detailTextLabel.numberOfLines = 2;
+        cell.imageView.image = WQLinearIcon(row == 0 ? @"folder" : @"folder.badge.plus");
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (section == 3) {
+        if (row >= _items.count) {
+            cell.textLabel.text = @"刷新列表";
+            cell.detailTextLabel.text = _items.count
+                ? [NSString stringWithFormat:@"当前 %lu 项", (unsigned long)_items.count] : @"目录为空";
+            cell.imageView.image = WQLinearIcon(@"arrow.clockwise");
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            NSDictionary *item = _items[row];
+            BOOL dir = [item[@"dir"] boolValue];
+            cell.textLabel.text = item[@"name"];
+            cell.textLabel.numberOfLines = 2;
+            cell.detailTextLabel.text = dir
+                ? @"目录 · 左滑可连同内容删除"
+                : [NSString stringWithFormat:@"文件 · %@", wq_size_text([item[@"size"] unsignedLongLongValue])];
+            cell.imageView.image = WQLinearIcon(dir ? @"folder" : @"doc");
+        }
+    } else if (section == 4) {
+        if (row == 0) {
+            cell.textLabel.text = @"第三方版说明";
+            cell.detailTextLabel.text = WQGameLuaThirdPartyNote;
+            cell.detailTextLabel.numberOfLines = 3;
+            cell.imageView.image = WQLinearIcon(@"info.circle");
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else {
             cell.textLabel.text = @"状态";
             cell.detailTextLabel.text = _status;
             cell.imageView.image = WQLinearIcon(@"clock");
-            cell.accessoryType = UITableViewCellAccessoryNone;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
+    } else {
+        cell.textLabel.text = @"清空 LuaDebug 整棵目录";
+        cell.detailTextLabel.text = @"删除全部子目录与文件，不保留副本";
+        cell.imageView.image = WQLinearIcon(@"trash");
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     return cell;
 }
@@ -1873,17 +2024,110 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 1) { [self copyText:_target]; return; }
-    if (indexPath.section == 2) {
-        if (indexPath.row == 0) [self copyText:WQGameLuaThirdPartyURL];
+    NSUInteger section = (NSUInteger)indexPath.section;
+    NSUInteger row = (NSUInteger)indexPath.row;
+    if (section == 0) {
+        if (row == 0) [self importTapped];
+        else if (row == 1) [self officialTapped];
+        else [self thirdPartyTapped];
         return;
     }
-    if (indexPath.row == 0) [self importTapped];
-    else if (indexPath.row == 1) [self officialTapped];
-    else [self thirdPartyTapped];
+    if (section == 1) {
+        if (row == 0) [self ensureChainAndRefresh];
+        else [self copyText:_target];
+        return;
+    }
+    if (section == 2) {
+        [self.view endEditing:YES];
+        WQOpenPathFromExtras(self.navigationController, row == 0 ? _luaDebug : _target);
+        return;
+    }
+    if (section == 3) { if (row >= _items.count) [self refreshItems]; return; }
+    if (section == 4) return;
+    [self purgeLuaDebugTapped];
 }
 
-#pragma mark Official (notice only)
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    return indexPath.section == 3 && (NSUInteger)indexPath.row < _items.count;
+}
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
+ forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.section != 3 ||
+        (NSUInteger)indexPath.row >= _items.count) return;
+    [self deleteItem:_items[(NSUInteger)indexPath.row]];
+}
+
+#pragma mark - Deletion
+
+- (void)deleteItem:(NSDictionary *)item
+{
+    NSString *name = item[@"name"], *path = item[@"path"];
+    BOOL dir = [item[@"dir"] boolValue];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:
+        [NSString stringWithFormat:@"删除「%@」？", name]
+        message:[NSString stringWithFormat:@"%@\n\n%@", path,
+            dir ? @"该目录及其全部内容会被移除，不保留副本，且无法撤销。"
+                : @"该文件会被移除，并在「备份」中保留一份副本。"]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"删除" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *__unused a) {
+            dispatch_async(wq_io(), ^{
+                NSString *error = nil;
+                BOOL ok = dir ? wq_delete_tree(path, &error) : wq_delete(path, &error);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    WQGameLuaViewController *v = weakSelf;
+                    if (!v) return;
+                    if (!ok) {
+                        [v setStatus:[@"删除失败：" stringByAppendingString:(error ?: @"未知错误")]];
+                        wq_alert(v, @"删除失败", error ?: @"未知错误");
+                        return;
+                    }
+                    wq_log(@"game: lua item deleted %@ (dir=%d)", path, dir ? 1 : 0);
+                    [v setStatus:[NSString stringWithFormat:@"已删除 %@", name]];
+                    [v refreshItems];
+                });
+            });
+        }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)purgeLuaDebugTapped
+{
+    NSString *luaDebug = _luaDebug;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空 LuaDebug？"
+        message:[NSString stringWithFormat:@"%@\n\n将删除该目录及其全部子目录与文件（包括 LuaSource、DFM、BusinessEntrance 和所有已注入的 lua）。\n\n不保留副本，无法撤销。此操作只清理本机调试目录，不改动游戏其他数据。删除后本页不会立刻重建，下次重新进入时会自动补建目录链。",
+            luaDebug]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *__unused a) {
+            dispatch_async(wq_io(), ^{
+                NSString *error = nil;
+                BOOL ok = wq_delete_tree(luaDebug, &error);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    WQGameLuaViewController *v = weakSelf;
+                    if (!v) return;
+                    if (!ok) {
+                        [v setStatus:[@"清空失败：" stringByAppendingString:(error ?: @"未知错误")]];
+                        wq_alert(v, @"清空失败", error ?: @"未知错误");
+                        return;
+                    }
+                    wq_log(@"game: LuaDebug tree purged -> %@", luaDebug);
+                    v->_items = @[];
+                    [v setChainStatus:@"LuaDebug 已清空 · 下次进入自动重建" ready:NO];
+                    [v setStatus:@"LuaDebug 已清空"];
+                });
+            });
+        }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+#pragma mark - Official (notice only)
 
 - (void)officialTapped
 {
@@ -1894,7 +2138,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     wq_log(@"game: official lua notice shown, no file written");
 }
 
-#pragma mark Custom import
+#pragma mark - Custom import
 
 - (void)importTapped
 {
@@ -1928,7 +2172,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     [self confirmWriteLocal:local name:name source:@"自定义导入"];
 }
 
-#pragma mark Third-party download
+#pragma mark - Third-party download
 
 - (void)thirdPartyTapped
 {
@@ -1974,23 +2218,23 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                 }
             }
             dispatch_async(dispatch_get_main_queue(), ^{
-                WQGameLuaViewController *s = weakSelf;
-                if (!s) return;
+                WQGameLuaViewController *v = weakSelf;
+                if (!v) return;
                 if (failure) {
-                    [s setStatus:[@"下载失败：" stringByAppendingString:failure]];
-                    wq_alert(s, @"下载失败", [NSString stringWithFormat:
-                        @"%@\n\n来源：%@\n\n源站临时不可用或拒绝访问时，可改用「自定义导入」从「文件」App 选择本地 lua。",
-                        failure, WQGameLuaThirdPartyURL]);
+                    [v setStatus:[@"下载失败：" stringByAppendingString:failure]];
+                    wq_alert(v, @"下载失败", [NSString stringWithFormat:
+                        @"%@\n\n源站临时不可用或拒绝访问时，可改用「自定义导入」从「文件」App 选择本地 lua。",
+                        failure]);
                     return;
                 }
                 wq_log(@"game: lua downloaded -> %@", local);
-                [s confirmWriteLocal:local name:WQGameLuaThirdPartyName source:@"第三方版"];
+                [v confirmWriteLocal:local name:WQGameLuaThirdPartyName source:@"第三方版"];
             });
         }];
     [task resume];
 }
 
-#pragma mark Shared write path
+#pragma mark - Shared write path
 
 - (void)confirmWriteLocal:(NSString *)local name:(NSString *)name source:(NSString *)source
 {
@@ -2042,21 +2286,22 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                    (unsigned long)created);
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-            WQGameLuaViewController *s = weakSelf;
-            if (!s) return;
+            WQGameLuaViewController *v = weakSelf;
+            if (!v) return;
             if (failure) {
-                [s setStatus:[@"失败：" stringByAppendingString:failure]];
-                wq_alert(s, @"注入失败", failure);
+                [v setStatus:[@"失败：" stringByAppendingString:failure]];
+                wq_alert(v, @"注入失败", failure);
                 return;
             }
             [NSFileManager.defaultManager removeItemAtPath:local error:nil];
-            [s setStatus:[NSString stringWithFormat:@"已写入 %@ · %@ · %@",
+            [v setStatus:[NSString stringWithFormat:@"已写入 %@ · %@ · %@",
                           name, source, wq_size_text(size)]];
             WQRecordInjection(@{@"target": target, @"game": WQGameExactName, @"alias": alias,
                                 @"ok": @1, @"replaced": @(replaced), @"failed": @0,
                                 @"files": name});
-            wq_alert(s, @"注入完成", [NSString stringWithFormat:@"%@\n\n目标：%@/%@\n\n%@",
+            wq_alert(v, @"注入完成", [NSString stringWithFormat:@"%@\n\n目标：%@/%@\n\n%@",
                                      name, target, name, WQGameRiskNote]);
+            [v refreshItems];
         });
     });
 }
