@@ -1,6 +1,6 @@
 //
 //  WQUI.h
-//  WQ Files shared UI helpers
+//  黑猫游戏工具箱 shared UI helpers
 //
 
 #import <UIKit/UIKit.h>

@@ -1,6 +1,6 @@
 //
 //  WQSharing.m
-//  WQ Files temporary exports and share sheets
+//  黑猫游戏工具箱 temporary exports and share sheets
 //  GPL-3.0-or-later.
 //
 

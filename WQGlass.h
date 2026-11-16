@@ -1,15 +1,13 @@
 //
 //  WQGlass.h
-//  WQ Files — 系统液态玻璃材质层
+//  黑猫游戏工具箱 — 系统液态玻璃材质层
 //  GPL-3.0-or-later.
 //
-//  Liquid Glass is a SYSTEM material, not a hand-drawn gradient or glow. This
-//  layer only puts it on the chrome: primary entries, buttons, input fields,
-//  floating controls and the credit panel. Content rows stay flat, following
-//  Apple's HIG ("glass belongs to the navigation/control layer").
-//
-//  UIGlassEffect is iOS 26+. It is resolved at runtime so the same binary also
-//  builds with older SDKs and degrades on devices where the class is absent.
+//  Liquid Glass is a SYSTEM material, not a hand-drawn gradient or glow. It is
+//  applied globally to chrome AND content rows (the product requirement here),
+//  with a single switch to fall back to flat neutral surfaces. Reduce
+//  Transparency, Dark Mode, Increase Contrast and Dynamic Type are honoured by
+//  WQAppearance.h.
 //
 
 #import <UIKit/UIKit.h>
@@ -17,17 +15,23 @@
 NS_ASSUME_NONNULL_BEGIN
 
 #define WQ_GLASS_INLINE static inline __attribute__((unused))
-#define WQGlassBackgroundTag 0x474C4153   /* "GLAS" */
-
-// The user can turn the material off in Settings; a plain neutral surface is
-// then used instead. Reduce Transparency is honoured automatically.
-#define WQGlassEnabledKey @"WQSettingGlass"
+#define WQGlassBackgroundTag      0x474C4153   /* "GLAS" */
+#define WQGlassProminentTag       (WQGlassBackgroundTag + 1)
+#define WQGlassEnabledKey        @"WQSettingGlass"
+#define WQGlassRowsEnabledKey    @"WQSettingGlassRows"
 
 WQ_GLASS_INLINE BOOL WQGlassEnabled(void)
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     if ([d objectForKey:WQGlassEnabledKey]) return [d boolForKey:WQGlassEnabledKey];
     return !UIAccessibilityIsReduceTransparencyEnabled();
+}
+
+WQ_GLASS_INLINE BOOL WQGlassRowsEnabled(void)
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    if ([d objectForKey:WQGlassRowsEnabledKey]) return [d boolForKey:WQGlassRowsEnabledKey];
+    return WQGlassEnabled();
 }
 
 WQ_GLASS_INLINE BOOL WQGlassClassAvailable(void)
@@ -40,31 +44,39 @@ WQ_GLASS_INLINE BOOL WQGlassClassAvailable(void)
 WQ_GLASS_INLINE UIVisualEffect *_Nullable WQGlassEffect(BOOL prominent)
 {
     if (!WQGlassEnabled()) return nil;
+    id effect = nil;
     Class cls = NSClassFromString(@"UIGlassEffect");
     if (cls) {
-        // UIGlassEffect() defaults to .regular. Style is deliberately not
-        // forced: .clear is for media, .regular is correct over our neutral UI.
-        id effect = [[cls alloc] init];
-        if (!effect) return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
-        // Tint only the one primary action, and keep it neutral — never blue.
-        if (prominent && [effect respondsToSelector:NSSelectorFromString(@"setTintColor:")])
-            [effect setValue:[UIColor colorWithWhite:0.32 alpha:0.16] forKey:@"tintColor"];
-        if ([effect respondsToSelector:NSSelectorFromString(@"setIsInteractive:")])
-            [effect setValue:@YES forKey:@"isInteractive"];
-        return (UIVisualEffect *)effect;
+        // UIGlassEffect() defaults to .regular, correct over neutral content.
+        effect = [[cls alloc] init];
+        if (effect) {
+            // Tint only the single primary action, and keep it neutral.
+            if (prominent && [effect respondsToSelector:NSSelectorFromString(@"setTintColor:")])
+                [effect setValue:[UIColor colorWithWhite:0.32 alpha:0.16] forKey:@"tintColor"];
+            if ([effect respondsToSelector:NSSelectorFromString(@"setIsInteractive:")])
+                [effect setValue:@YES forKey:@"isInteractive"];
+        }
     }
-    // Older iOS: a system material, still neutral, still no custom gradient.
+    if (effect) return (UIVisualEffect *)effect;
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
 }
 
-// Attach glass as the bottom-most subview of any control. Idempotent, pinned
-// by constraints so it stays correct under Auto Layout, and never eats touches.
+WQ_GLASS_INLINE UIView *_Nullable WQGlassSubview(UIView *host)
+{
+    UIView *v = [host viewWithTag:WQGlassBackgroundTag];
+    if (!v) v = [host viewWithTag:WQGlassProminentTag];
+    return v;
+}
+
+// Attach glass as the bottom-most subview of any view. Idempotent, pinned by
+// constraints so it stays correct under Auto Layout, and never eats touches.
 WQ_GLASS_INLINE void WQGlassAttach(UIView *host, BOOL prominent, CGFloat radius)
 {
-    if ([host viewWithTag:WQGlassBackgroundTag]) return;
+    if (WQGlassSubview(host)) return;
+    NSInteger tag = prominent ? WQGlassProminentTag : WQGlassBackgroundTag;
     UIVisualEffect *effect = WQGlassEffect(prominent);
     UIVisualEffectView *glass = [[UIVisualEffectView alloc] initWithEffect:effect];
-    glass.tag = WQGlassBackgroundTag;
+    glass.tag = tag;
     glass.userInteractionEnabled = NO;
     glass.translatesAutoresizingMaskIntoConstraints = NO;
     glass.layer.cornerRadius = radius;
@@ -72,7 +84,7 @@ WQ_GLASS_INLINE void WQGlassAttach(UIView *host, BOOL prominent, CGFloat radius)
     if (!effect) {
         glass.backgroundColor = prominent
             ? [UIColor colorWithWhite:0.90 alpha:1.0]
-            : [UIColor colorWithWhite:0.97 alpha:1.0];
+            : UIColor.secondarySystemGroupedBackgroundColor;
     }
     [host insertSubview:glass atIndex:0];
     [NSLayoutConstraint activateConstraints:@[
@@ -89,13 +101,45 @@ WQ_GLASS_INLINE void WQGlassAttach(UIView *host, BOOL prominent, CGFloat radius)
     host.layer.borderWidth = 0;
 }
 
-// A glass panel used for the credit block and the primary home entry.
+// A glass panel used for the credit blocks, the overview and the primary entry.
 WQ_GLASS_INLINE UIView *WQGlassPanel(CGFloat radius)
 {
     UIView *panel = [UIView new];
     panel.translatesAutoresizingMaskIntoConstraints = NO;
     WQGlassAttach(panel, NO, radius);
     return panel;
+}
+
+// A glass background for a table cell. It is installed as backgroundView so
+// the cell itself is never clipped (swipe actions and accessories stay intact).
+WQ_GLASS_INLINE UIView *WQGlassCellPanel(CGFloat radius)
+{
+    UIView *panel = [[UIView alloc] initWithFrame:CGRectZero];
+    panel.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    panel.tag = WQGlassBackgroundTag;
+    WQGlassAttach(panel, NO, radius);
+    return panel;
+}
+
+// Called when traits change: refresh the effect of every attached glass view.
+// Stored tags tell us whether the view was the prominent variant.
+WQ_GLASS_INLINE void WQGlassRefreshIn(UIView *root)
+{
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
+    while (stack.count) {
+        UIView *v = stack.lastObject;
+        [stack removeLastObject];
+        if ([v isKindOfClass:UIVisualEffectView.class] &&
+            (v.tag == WQGlassBackgroundTag || v.tag == WQGlassProminentTag)) {
+            BOOL prominent = v.tag == WQGlassProminentTag;
+            UIVisualEffectView *effectView = (UIVisualEffectView *)v;
+            effectView.effect = WQGlassEffect(prominent);
+            effectView.backgroundColor = WQGlassEnabled() ? UIColor.clearColor
+                : (prominent ? [UIColor colorWithWhite:0.90 alpha:1.0]
+                             : UIColor.secondarySystemGroupedBackgroundColor);
+        }
+        for (UIView *child in v.subviews) [stack addObject:child];
+    }
 }
 
 NS_ASSUME_NONNULL_END

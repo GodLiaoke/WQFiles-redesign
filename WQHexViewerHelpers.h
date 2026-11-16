@@ -1,6 +1,6 @@
 //
 //  WQHexViewerHelpers.h
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  Small Foundation-portable validation helpers for the hex viewer.
 //

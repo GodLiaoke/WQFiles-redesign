@@ -1,6 +1,6 @@
 //
 //  WQDir.h
-//  WQ Files folder browser interface
+//  黑猫游戏工具箱 folder browser interface
 //
 
 #import <UIKit/UIKit.h>

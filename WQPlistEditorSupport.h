@@ -1,6 +1,6 @@
 //
 //  WQPlistEditorSupport.h
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  Portable limits shared by the property-list editor and its regression tests.
 //

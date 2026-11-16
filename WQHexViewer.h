@@ -1,6 +1,6 @@
 //
 //  WQHexViewer.h
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  Hex viewer and editor for files of any size: reads in pages on demand,
 //  go to offset, find hex or text, overwrite bytes in place (wq_patch, with a

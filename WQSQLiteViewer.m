@@ -1,6 +1,6 @@
 //
 //  WQSQLiteViewer.m
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  Read-only SQLite viewer. The database and its -wal file are copied into a
 //  private temporary folder first (a -shm file is rebuilt by SQLite there),

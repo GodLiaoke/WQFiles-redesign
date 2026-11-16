@@ -1,6 +1,6 @@
 //
 //  main.m
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  Proof-of-concept file browser for iOS 27 that reaches other containers
 //  through the worse_query sandbox escape by Taj C (forcequit),
@@ -25,6 +25,8 @@
 #import "WQHexViewer.h"
 #import "WQSQLiteViewer.h"
 #import "WQDesignTokens.h"
+#import "WQAppearance.h"
+#import "WQExtras.h"
 #import "WQGameFeatures.h"
 
 // Settings keys live in WQDesignTokens.h so the settings page, the file
@@ -490,7 +492,7 @@ static void wq_open_file(UINavigationController *nav, NSString *path, BOOL readO
         struct stat st;
         BOOL link = wq_stat(path, &st) && S_ISLNK(st.st_mode);
         if (host) wq_alert(host, link ? @"符号链接" : @"无法打开此项目",
-                           link ? @"WQ Files 查看、分享和编辑时不跟随符号链接。"
+                           link ? @"黑猫游戏工具箱 查看、分享和编辑时不跟随符号链接。"
                                 : @"只能查看普通文件。");
         return;
     }
@@ -1218,7 +1220,7 @@ static NSString *wq_index_letter(NSString *name)
     UIViewController *next;
     if (item.isLink) {
         wq_alert(self, @"符号链接",
-                 @"WQ Files 查看、分享和编辑时不跟随符号链接。如需打开目标，请显式使用拷贝路径。");
+                 @"黑猫游戏工具箱 查看、分享和编辑时不跟随符号链接。如需打开目标，请显式使用拷贝路径。");
         return;
     }
     if (item.isDir) {
@@ -1667,7 +1669,7 @@ static NSString *const kSystemGroupRoot = @"/private/var/containers/Shared/Syste
 - (NSString *)fullLog
 {
     NSDictionary *info = NSBundle.mainBundle.infoDictionary;
-    return [NSString stringWithFormat:@"WQ Files %@ (%@)\n%@\n\n%@",
+    return [NSString stringWithFormat:@"黑猫游戏工具箱 %@ (%@)\n%@\n\n%@",
             info[@"CFBundleShortVersionString"] ?: @"?", info[@"CFBundleVersion"] ?: @"?", wq_device_line(), wq_log_text()];
 }
 
@@ -1718,6 +1720,12 @@ static NSString *const kSystemGroupRoot = @"/private/var/containers/Shared/Syste
 
 - (void)navigationController:(UINavigationController *)nav willShowViewController:(UIViewController *)vc animated:(BOOL)animated
 {
+    // Every screen gets the same table/view styling, including modules that
+    // were written before the glass redesign. Cells are handled globally in
+    // WQAppearance.m, so no controller can drift from the design system.
+    if ([vc isKindOfClass:UITableViewController.class])
+        WQStyleTableView(((UITableViewController *)vc).tableView);
+    else WQStyleView(vc.view);
     NSUInteger depth = [nav.viewControllers indexOfObject:vc];
     if (depth == NSNotFound || depth < 2) {
         if (vc.navigationItem.leftBarButtonItem.tag == 0x484f4d45) vc.navigationItem.leftBarButtonItem = nil;
@@ -1774,6 +1782,10 @@ typedef NS_ENUM(NSInteger, WQSettingAction) {
     WQSettingActionOpenBackups   = 3,
     WQSettingActionClearPaths    = 4,
     WQSettingActionResetAll      = 5,
+    WQSettingActionClearHistory  = 6,
+    WQSettingActionClearBookmarks = 7,
+    WQSettingActionOpenConfig    = 8,
+    WQSettingActionOpenAbout     = 9,
 };
 
 @interface WQSettingRow : NSObject
@@ -1849,8 +1861,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
         _footers = @[
             @"全部应用数据会遍历整棵容器目录树。若 iOS 27.0 上系统数据打不开、或列表一直停在扫描，请开启兼容模式并彻底退出后重开：它会隐藏系统区域，改用 iOS 26 的授权方式与容器列表。切换后需重启才能完全生效。",
             @"快速目录读取用一次目录遍历拿到子文件夹，避免逐个子项授权；并行写入同时处理多个资源文件；检测缓存复用已解析的应用标识。列表缓存时长决定返回页面时是否重读目录。全部开关即时生效。",
-            @"注入暂存是导入后、写入前的临时副本。正常写入会自动清理，异常退出可能留下残留。备份不会被这里的清理操作删除。",
-            @"液态玻璃只用于导航栏、主入口、按钮与输入控件，内容列表保持平面。关闭后改用中性平面材质；系统开启「降低透明度」时也会自动降级。配色、圆角与间距仍由统一设计变量固定。",
+            @"注入暂存是导入后、写入前的临时副本。正常写入会自动清理，异常退出可能留下残留。配置导入 / 导出只处理路径记录，不含资源文件；备份不会被这里的清理操作删除。",
+            @"液态玻璃全局应用于导航栏、控件与列表行。外观模式可覆盖浅色/深色；系统动态色自动适配高对比；开启「降低透明度」时自动降级为平面中性色；字号与行高跟随系统文本大小。关闭玻璃或全局行玻璃后改用平面材质，圆角与间距仍由设计变量固定。",
             @"递归删除会清空目录内容，且不逐份保留备份。覆盖与保存校验由访问层固定开启，不提供关闭。",
             @"以下操作不可撤销。清空路径只移除本应用保存的记录，不会删除游戏目录里的文件；重置设置会恢复全部开关默认值，但保留备份与注入路径。",
         ];
@@ -1867,9 +1879,14 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
               WQActionRow(@"清理注入暂存", @"清理", WQSettingActionClearStaging),
               WQDynamicRow(@"已保存注入路径", @"paths"),
               WQActionRow(@"清除检测缓存", @"清除", WQSettingActionClearCache),
-              WQActionRow(@"打开备份", @"打开", WQSettingActionOpenBackups)],
+              WQActionRow(@"打开备份", @"打开", WQSettingActionOpenBackups),
+              WQActionRow(@"配置导入 / 导出", @"打开", WQSettingActionOpenConfig)],
             @[WQDynamicRow(@"材质", @"glassState"),
+              WQTapRow(@"外观模式", @"appearanceMode"),
+              WQDynamicRow(@"当前状态", @"appearanceState"),
               WQSwitchRow(@"液态玻璃材质", WQGlassEnabledKey),
+              WQSwitchRow(@"全局行玻璃", WQGlassRowsEnabledKey),
+              WQActionRow(@"关于", @"打开", WQSettingActionOpenAbout),
               WQValueRow(@"图标", @"线性"),
               WQValueRow(@"圆角", @"8 / 20 点"),
               WQValueRow(@"间距档位", @"4 点"),
@@ -1878,6 +1895,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
               WQValueRow(@"覆盖前保留副本", @"开启"),
               WQValueRow(@"保存时校验版本", @"开启")],
             @[WQActionRow(@"清空所有注入路径", @"清空", WQSettingActionClearPaths),
+              WQActionRow(@"清空注入记录", @"清空", WQSettingActionClearHistory),
+              WQActionRow(@"清空所有收藏", @"清空", WQSettingActionClearBookmarks),
               WQActionRow(@"重置全部设置", @"重置", WQSettingActionResetAll)],
         ];
     }
@@ -1907,6 +1926,8 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     if ([key isEqualToString:@"glassState"])
         return !WQGlassEnabled() ? @"平面中性"
             : (WQGlassClassAvailable() ? @"系统液态玻璃" : @"系统材质（降级）");
+    if ([key isEqualToString:@"appearanceMode"]) return WQAppearanceModeText();
+    if ([key isEqualToString:@"appearanceState"]) return WQAppearanceStateText();
     if ([key isEqualToString:@"staging"]) {
         NSUInteger n = WQGameStagingFileCount();
         return n ? [NSString stringWithFormat:@"%lu 个文件 · %@", (unsigned long)n,
@@ -1959,8 +1980,9 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
                           [row.key isEqualToString:WQSettingFastDirKey] ||
                           [row.key isEqualToString:WQSettingParallelWriteKey] ||
                           [row.key isEqualToString:WQSettingDetectCacheKey];
-        control.on = [row.key isEqualToString:WQGlassEnabledKey]
-            ? WQGlassEnabled() : WQSettingBool(row.key, defaultsOn);
+        control.on = [row.key isEqualToString:WQGlassEnabledKey] ? WQGlassEnabled()
+            : ([row.key isEqualToString:WQGlassRowsEnabledKey] ? WQGlassRowsEnabled()
+               : WQSettingBool(row.key, defaultsOn));
         control.onTintColor = WQColorStrong();
         control.tag = indexPath.section * 100 + indexPath.row;
         [control addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
@@ -1994,8 +2016,17 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     WQSettingRow *row = _rows[indexPath.section][indexPath.row];
     if (!row.tappable) return;
-    NSInteger idx = [NSUserDefaults.standardUserDefaults integerForKey:WQSettingReloadAgeIdxKey];
-    [NSUserDefaults.standardUserDefaults setInteger:(idx + 1) % 3 forKey:WQSettingReloadAgeIdxKey];
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if ([row.key isEqualToString:@"appearanceMode"]) {
+        NSInteger mode = [defaults integerForKey:WQSettingAppearanceModeKey];
+        [defaults setInteger:(mode + 1) % 3 forKey:WQSettingAppearanceModeKey];
+        WQApplyAppearanceMode();
+        WQRefreshAllWindows();
+        [self.tableView reloadData];
+        return;
+    }
+    NSInteger idx = [defaults integerForKey:WQSettingReloadAgeIdxKey];
+    [defaults setInteger:(idx + 1) % 3 forKey:WQSettingReloadAgeIdxKey];
     [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
 }
 
@@ -2011,9 +2042,11 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
     // a restart, which the group footer states.
     if ([row.key isEqualToString:WQSettingLegacyScopeKey]) wq_set_legacy_scope(sender.on);
     if ([row.key isEqualToString:WQSettingDetectCacheKey] && !sender.on) WQGameClearDetectionCache();
-    if ([row.key isEqualToString:WQGlassEnabledKey]) {
+    if ([row.key isEqualToString:WQGlassEnabledKey] ||
+        [row.key isEqualToString:WQGlassRowsEnabledKey]) {
+        WQRefreshAllWindows();
         [self.tableView reloadData];
-        wq_alert(self, @"材质已切换", @"新打开的页面会立即使用新材质；当前已加载的页面重新进入后生效。");
+        wq_alert(self, @"材质已切换", @"已刷新全部页面；系统开启「降低透明度」时会自动使用平面材质。");
     }
     if ([row.key isEqualToString:WQSettingCompactRowsKey]) [self.tableView reloadData];
     wq_log(@"settings: %@ = %d", row.key, sender.on ? 1 : 0);
@@ -2027,7 +2060,39 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
         case WQSettingActionOpenBackups:   [self openBackups]; break;
         case WQSettingActionClearPaths:    [self clearPaths]; break;
         case WQSettingActionResetAll:      [self resetAll]; break;
+        case WQSettingActionClearHistory:  [self clearHistory]; break;
+        case WQSettingActionClearBookmarks: [self clearBookmarks]; break;
+        case WQSettingActionOpenConfig:
+            [self.navigationController pushViewController:[WQConfigViewController new] animated:YES]; break;
+        case WQSettingActionOpenAbout:
+            [self.navigationController pushViewController:[WQAboutViewController new] animated:YES]; break;
     }
+}
+
+- (void)clearHistory
+{
+    NSUInteger n = WQInjectionHistoryCount();
+    if (!n) { wq_alert(self, @"没有记录", @"还没有注入记录。"); return; }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空注入记录？"
+        message:[NSString stringWithFormat:@"将删除 %lu 条本机记录，不删除已写入的文件或备份。此操作无法撤销。", (unsigned long)n]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *__unused a) { WQInjectionHistoryClear(); }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)clearBookmarks
+{
+    NSUInteger n = WQBookmarkCount();
+    if (!n) { wq_alert(self, @"没有收藏", @"还没有保存任何路径。"); return; }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空所有收藏？"
+        message:[NSString stringWithFormat:@"将删除 %lu 条路径收藏，不改动目标文件。此操作无法撤销。", (unsigned long)n]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *__unused a) { WQBookmarkClear(); }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)clearStaging
@@ -2095,10 +2160,13 @@ static WQSettingRow *WQActionRow(NSString *title, NSString *buttonTitle, WQSetti
                                     WQSettingLegacyScopeKey, WQSettingFastDirKey,
                                     WQSettingParallelWriteKey, WQSettingDetectCacheKey,
                                     WQSettingCompactRowsKey, WQSettingReloadAgeIdxKey,
-                                    WQGlassEnabledKey])
+                                    WQGlassEnabledKey, WQGlassRowsEnabledKey,
+                                    WQSettingAppearanceModeKey])
                 [defaults removeObjectForKey:key];
             wq_set_legacy_scope(NO);
             WQGameClearDetectionCache();
+            WQApplyAppearanceMode();
+            WQRefreshAllWindows();
             [weakSelf.tableView reloadData];
         }]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -2243,7 +2311,7 @@ static UIView *WQRootGameBackground(void)
 - (instancetype)init
 {
     if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
-        self.title = @"WQ Files";
+        self.title = @"黑猫游戏工具箱";
         [self rebuildLocations];
     }
     return self;
@@ -2271,6 +2339,7 @@ static UIView *WQRootGameBackground(void)
 {
     [super viewWillAppear:animated];
     [self rebuildLocations];
+    self.tableView.tableHeaderView = WQOverviewHeader();
     [self.tableView reloadData];
 }
 
@@ -2281,6 +2350,7 @@ static UIView *WQRootGameBackground(void)
     self.tableView.backgroundColor = WQColorBackground();
     self.tableView.separatorColor = WQColorLine();
     self.tableView.tableFooterView = [self authorFooter];
+    self.tableView.tableHeaderView = WQOverviewHeader();
     dispatch_async(wq_io(), ^{
         NSString *recovery = wq_recover_interrupted_restore();
         if (recovery) {
@@ -2305,7 +2375,7 @@ static UIView *WQRootGameBackground(void)
         if (group) return;
         dispatch_async(dispatch_get_main_queue(), ^{
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"签名问题：缺少 App Group"
-                message:@"WQ Files 需要 App Group 才能访问其他应用的目录，签名工具把它去掉了。"
+                message:@"黑猫游戏工具箱 需要 App Group 才能访问其他应用的目录，签名工具把它去掉了。"
                         @"缺少它时所有目录都打不开，应用列表为空或显示「NO TOKEN」。\n\n"
                         @"请用 AltStore、SideStore 或 Sideloadly 重新安装（它们会创建 App Group），"
                         @"或使用包含 App Group 的描述文件签名。通配证书（多数 Feather/ESign 方案）做不到。"
@@ -2326,7 +2396,7 @@ static UIView *WQRootGameBackground(void)
     UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 72)];
     UILabel *by = [UILabel new];
     NSDictionary *info = NSBundle.mainBundle.infoDictionary;
-    by.text = [NSString stringWithFormat:@"WQ Files %@ (%@) · GPL-3.0-or-later",
+    by.text = [NSString stringWithFormat:@"黑猫游戏工具箱 %@ (%@) · GPL-3.0-or-later",
                info[@"CFBundleShortVersionString"] ?: @"?", info[@"CFBundleVersion"] ?: @"?"];
     by.font = WQFontCaption();
     by.textColor = WQColorText3();
@@ -2357,7 +2427,7 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
     if (section == WQRootSectionGame) return 1;
     if (section == WQRootSectionContainers)
         return (NSInteger)_locations.count + (wq_system_areas_reachable() ? 1 : 0);
-    return 7;   // WQRootSectionTools
+    return 12;   // WQRootSectionTools
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
@@ -2422,7 +2492,10 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
     } else {
         NSArray *tools = @[@[@"应用列表", @"square.grid.3x3"], @[@"缓存清理", @"trash"], @[@"前往路径…", @"arrow.right.circle"],
                            @[@"应用备份", @"clock.arrow.circlepath"], @[@"备份", @"clock.arrow.circlepath"], @[@"日志", @"doc.plaintext"],
-                           @[@"设置", @"slider.horizontal.3"]];
+                           @[@"设置", @"slider.horizontal.3"], @[@"路径收藏", @"bookmark"],
+                           @[@"注入记录", @"clock"], @[@"文件校验", @"number"],
+                           @[@"配置导入 / 导出", @"arrow.up.arrow.down"],
+                           @[@"关于", @"info.circle"]];
         c.text = tools[(NSUInteger)indexPath.row][0];
         c.image = WQLinearIcon(tools[(NSUInteger)indexPath.row][1]);
     }
@@ -2463,6 +2536,16 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
             next = [[WQDirViewController alloc] initWithPath:wq_backup_root() title:@"备份"];
         } else if (indexPath.row == 6) {
             next = [WQSettingsViewController new];
+        } else if (indexPath.row == 7) {
+            next = [WQBookmarksViewController new];
+        } else if (indexPath.row == 8) {
+            next = [WQInjectionHistoryViewController new];
+        } else if (indexPath.row == 9) {
+            next = [WQFileInspectorViewController new];
+        } else if (indexPath.row == 10) {
+            next = [WQConfigViewController new];
+        } else if (indexPath.row == 11) {
+            next = [WQAboutViewController new];
         } else {
             next = [WQLogViewController new];
         }
@@ -2476,6 +2559,22 @@ typedef NS_ENUM(NSInteger, WQRootSection) {
 }
 
 @end
+
+void WQOpenPathFromExtras(UINavigationController *nav, NSString *path)
+{
+    struct stat st;
+    if (!wq_stat(path, &st)) {
+        wq_alert(nav.topViewController, @"无法打开", @"路径不存在或当前不可访问。");
+        return;
+    }
+    BOOL dir = S_ISDIR(st.st_mode);
+    if (S_ISLNK(st.st_mode)) {
+        struct stat target;
+        dir = stat(path.fileSystemRepresentation, &target) == 0 && S_ISDIR(target.st_mode);
+    }
+    if (dir) [nav pushViewController:[[WQDirViewController alloc] initWithPath:path title:nil] animated:YES];
+    else wq_open_file(nav, path, NO, WQOpenAuto);
+}
 
 #pragma mark - App
 
@@ -2552,9 +2651,9 @@ static NSString *wq_count_text(int64_t n)
     text.textAlignment = NSTextAlignmentCenter;
     text.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     text.textColor = WQColorText2();
-    text.text = @"iOS 不允许 WQ Files 直接列出这些目录，因此需要对本机全部文件编号检查一次。"
+    text.text = @"iOS 不允许 黑猫游戏工具箱 直接列出这些目录，因此需要对本机全部文件编号检查一次。"
                 @"只有首次较慢，之后只检查新增文件。\n\n"
-                @"请保持 WQ Files 在前台；切到其他应用或锁屏会暂停扫描。";
+                @"请保持 黑猫游戏工具箱 在前台；切到其他应用或锁屏会暂停扫描。";
     _bar = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
     _status = [UILabel new];
     _status.font = [UIFont monospacedDigitSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize
@@ -2627,9 +2726,9 @@ static BOOL wq_confirm_full_scan(NSString *what, int64_t ids, double seconds)
         UIViewController *top = wq_top_view_controller();
         if (!top) { dispatch_semaphore_signal(answered); return; }   // not in front: don't scan unasked
         NSString *message = [NSString stringWithFormat:
-            @"要列出%@，WQ Files 需要对本机全部文件编号检查一次：%@ 个文件，%@。\n\n"
+            @"要列出%@，黑猫游戏工具箱 需要对本机全部文件编号检查一次：%@ 个文件，%@。\n\n"
             @"只有首次需要这样；之后只检查新增文件，几秒即可完成。\n\n"
-            @"扫描期间请保持 WQ Files 在前台。", what, wq_count_text(ids), wq_duration_text(seconds)];
+            @"扫描期间请保持 黑猫游戏工具箱 在前台。", what, wq_count_text(ids), wq_duration_text(seconds)];
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"扫描全部文件？" message:message
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"稍后" style:UIAlertActionStyleCancel handler:^(UIAlertAction *__unused a) {
@@ -2681,6 +2780,16 @@ static void wq_full_scan_progress(int64_t done, int64_t total, BOOL finished)
 @end
 
 @implementation WQAppDelegate
+
+- (BOOL)application:(UIApplication *)application
+didFinishLaunchingWithOptions:(NSDictionary<UIApplicationLaunchOptionsKey, id> *)launchOptions
+{
+    (void)application; (void)launchOptions;
+    WQApplyGlobalAppearance();
+    WQApplyAppearanceMode();
+    WQRegisterAppearanceNotifications();
+    return YES;
+}
 
 - (UISceneConfiguration *)application:(UIApplication *)application
 configurationForConnectingSceneSession:(UISceneSession *)session

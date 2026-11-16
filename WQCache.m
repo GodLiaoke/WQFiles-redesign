@@ -1,6 +1,6 @@
 //
 //  WQCache.m
-//  WQ Files cache cleaner
+//  黑猫游戏工具箱 cache cleaner
 //  GPL-3.0-or-later.
 //
 

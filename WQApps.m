@@ -1,6 +1,6 @@
 //
 //  WQApps.m
-//  WQ Files app backup and restore manager
+//  黑猫游戏工具箱 app backup and restore manager
 //  GPL-3.0-or-later.
 //
 
@@ -907,7 +907,7 @@ static void WQAppScanWatch(WQScanCancellation *cancellation, NSUInteger lastSeri
 {
     NSString *path = backup[@"path"];
     NSString *warning = [backup[@"verified"] boolValue] ? @""
-        : [NSString stringWithFormat:@"\n\nThis backup is unverified (%@). WQ Files will re-check its parts before changing anything.",
+        : [NSString stringWithFormat:@"\n\nThis backup is unverified (%@). 黑猫游戏工具箱 will re-check its parts before changing anything.",
            backup[@"reason"] ?: @"no typed manifest"];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Restore %@?", app.name]
         message:[NSString stringWithFormat:@"Replaces the app's current Documents and Library with the backup from %@; tmp is left untouched. "

@@ -1,11 +1,13 @@
 //
 //  WQGameFeatures.m
-//  WQ Files — game resource tools
+//  黑猫游戏工具箱 — game resource tools
 //  GPL-3.0-or-later.
 //
 
 #import "WQGameFeatures.h"
 #import "WQDesignTokens.h"
+#import "WQAppearance.h"
+#import "WQExtras.h"
 #import "WQAccess.h"
 #import "WQLaunchServices.h"
 #import "WQUI.h"
@@ -114,6 +116,26 @@ static void WQGameAddPath(NSDictionary *entry)
 static NSString *WQGameFullPath(NSDictionary *entry)
 {
     return [entry[@"container"] stringByAppendingPathComponent:entry[@"relative"]];
+}
+
+NSArray<NSDictionary *> *WQGameSavedEntries(void) { return WQGameLoadPaths(); }
+
+// Config import only accepts well-formed entries; WQGameAddPath deduplicates
+// by container + relative path, so an existing setup is never duplicated.
+void WQGameImportEntries(NSArray<NSDictionary *> *entries)
+{
+    for (id raw in entries) {
+        if (![raw isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *d = raw;
+        NSString *container = d[@"container"], *rel = d[@"relative"];
+        if (![container isKindOfClass:NSString.class] || ![container hasPrefix:@"/"] ||
+            ![rel isKindOfClass:NSString.class] || !WQGameSafeRelative(rel)) continue;
+        NSDictionary *clean = @{@"id": NSUUID.UUID.UUIDString,
+            @"game": [d[@"game"] isKindOfClass:NSString.class] ? d[@"game"] : @"自定义",
+            @"alias": [d[@"alias"] isKindOfClass:NSString.class] ? d[@"alias"] : rel.lastPathComponent,
+            @"container": container, @"relative": rel};
+        WQGameAddPath(clean);
+    }
 }
 
 // A slim, validated snapshot of the last successful detection. On a cold start
@@ -381,7 +403,7 @@ static CGFloat WQGameRowH(void) { return WQSettingGet(WQSettingCompactRowsKey, N
 static UITableViewCell *WQGamePlainCell(void)
 {
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-    c.backgroundColor = WQColorSurface();
+    WQStyleCell(c);
     c.textLabel.font = WQFontBody();
     c.textLabel.textColor = WQColorText();
     c.detailTextLabel.font = WQFontCaption();
@@ -653,7 +675,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     [super viewDidLoad];
     self.title = @"游戏资源注入";
     self.navigationController.navigationBar.prefersLargeTitles = NO;
-    self.tableView.backgroundColor = WQColorBackground();
+    WQStyleTableView(self.tableView);
     self.tableView.separatorColor = WQColorLine();
     self.tableView.tableHeaderView = WQGameCreditHeader();
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
@@ -760,10 +782,11 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     });
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
+    if (section == 2) return 3;   // 快捷操作
     if (section == 1) return (NSInteger)_visiblePaths.count + 1;   // + add-path row
     if (_detecting && !_apps.count) return 1;
     if (!_apps.count) return 3;   // status + 查看日志 + 手动填写
@@ -779,6 +802,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
         if (_detecting && _apps.count) return @"已安装应用 · 正在刷新…";
         return @"已安装应用 · 选择容器";
     }
+    if (section == 2) return @"快捷操作";
     if (_searching)
         return [NSString stringWithFormat:@"保存的注入路径 · %lu 项", (unsigned long)_visiblePaths.count];
     return @"保存的注入路径";
@@ -797,6 +821,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
         NSString *how = @"搜索支持名称、应用标识、容器 UUID 与完整路径；多个关键词用空格分隔，完全相等的结果排最前。搜索时不限 5 个，点「显示全部」可展开完整列表。";
         return [NSString stringWithFormat:@"%@。%@\n\n三角洲行动按已验证的特征目录识别；其余游戏只按应用标识排序推荐，不猜测资源目录。长按任意行可复制容器路径。", count, how];
     }
+    if (section == 2) return @"与工作台共用同一套玻璃材质与线性图标；记录、校验与配置都不改动游戏文件。";
     return @"搜索会同时过滤已保存路径。点按快捷放入资源文件，长按可复制完整路径；左滑只删除本应用的记录，不删除游戏里的文件。";
 }
 
@@ -811,6 +836,18 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     cell.accessoryType = UITableViewCellAccessoryNone;
     cell.accessoryView = nil;
     NSArray<NSString *> *tokens = _queryTokens;
+
+    if (indexPath.section == 2) {
+        NSArray *titles = @[@"注入记录", @"文件校验", @"配置导入 / 导出"];
+        NSArray *subtitles = @[@"查看最近写入结果，最多 200 条", @"流式计算 SHA-256 与文件大小",
+                               @"导出或合并注入路径与路径收藏"];
+        NSArray *icons = @[@"clock", @"number", @"arrow.up.arrow.down"];
+        cell.textLabel.text = titles[(NSUInteger)indexPath.row];
+        cell.detailTextLabel.text = subtitles[(NSUInteger)indexPath.row];
+        cell.imageView.image = WQLinearIcon(icons[(NSUInteger)indexPath.row]);
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        return cell;
+    }
 
     if (indexPath.section == 0) {
         NSUInteger idx = (NSUInteger)indexPath.row;
@@ -915,6 +952,15 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == 2) {
+        [self.view endEditing:YES];
+        UIViewController *vc = nil;
+        if (indexPath.row == 0) vc = [WQInjectionHistoryViewController new];
+        else if (indexPath.row == 1) vc = [WQFileInspectorViewController new];
+        else vc = [WQConfigViewController new];
+        [self.navigationController pushViewController:vc animated:YES];
+        return;
+    }
     if (indexPath.section == 0) {
         NSUInteger idx = (NSUInteger)indexPath.row;
         if (_detecting) return;
@@ -1064,7 +1110,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
     [super viewDidLoad];
     self.title = _relative.length ? _relative.lastPathComponent : @"数据根目录";
     self.navigationController.navigationBar.prefersLargeTitles = NO;
-    self.tableView.backgroundColor = WQColorBackground();
+    WQStyleTableView(self.tableView);
     self.tableView.separatorColor = WQColorLine();
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.navigationItem.rightBarButtonItem =
@@ -1256,7 +1302,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
     [super viewDidLoad];
     self.title = @"添加注入路径";
     self.navigationController.navigationBar.prefersLargeTitles = NO;
-    self.tableView.backgroundColor = WQColorBackground();
+    WQStyleTableView(self.tableView);
     self.tableView.separatorColor = WQColorLine();
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
 
@@ -1378,7 +1424,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
     [super viewDidLoad];
     self.title = @"放入资源文件";
     self.navigationController.navigationBar.prefersLargeTitles = NO;
-    self.tableView.backgroundColor = WQColorBackground();
+    WQStyleTableView(self.tableView);
     self.tableView.separatorColor = WQColorLine();
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"选择文件" style:UIBarButtonItemStylePlain
@@ -1628,6 +1674,13 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                 ? [NSString stringWithFormat:@"%@\n\n失败（已留在列表）：\n%@", summary,
                                              [failures componentsJoinedByString:@"\n"]]
                 : [NSString stringWithFormat:@"%@\n\n目标：%@", summary, target];
+            NSArray *names = [files valueForKey:@"name"] ?: @[];
+            WQRecordInjection(@{@"target": target,
+                                @"game": s->_entry[@"game"] ?: @"",
+                                @"alias": s->_entry[@"alias"] ?: @"",
+                                @"ok": @(okCount), @"replaced": @(replaced),
+                                @"failed": @(failures.count),
+                                @"files": [names componentsJoinedByString:@"、"] ?: @""});
             wq_alert(s, failures.count ? @"部分完成" : @"写入完成", msg);
         });
     });

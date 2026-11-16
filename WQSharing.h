@@ -1,6 +1,6 @@
 //
 //  WQSharing.h
-//  WQ Files temporary exports and share sheets
+//  黑猫游戏工具箱 temporary exports and share sheets
 //
 
 #import <UIKit/UIKit.h>

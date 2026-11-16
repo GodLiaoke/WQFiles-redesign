@@ -1,6 +1,6 @@
 //
 //  WQGameFeatures.h
-//  WQ Files — game resource tools
+//  黑猫游戏工具箱 — game resource tools
 //  GPL-3.0-or-later.
 //
 //  A neutral, user-driven file tool: show installed apps with their real

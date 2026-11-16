@@ -1,6 +1,6 @@
 //
 //  WQPlistEditor.m
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  GPL-3.0-or-later.
 //

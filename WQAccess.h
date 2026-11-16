@@ -1,6 +1,6 @@
 //
 //  WQAccess.h
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  File access outside the sandbox through the worse_query technique by
 //  Taj C (forcequit), https://github.com/forcequitOS/worse_query,

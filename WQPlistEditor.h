@@ -1,6 +1,6 @@
 //
 //  WQPlistEditor.h
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  Property list editor: browse dictionaries and arrays, edit values by type,
 //  add, delete, rename and reorder. Saves in the file's original format through

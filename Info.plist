@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
+	<string>zh_CN</string>
 	<key>CFBundleDisplayName</key>
-	<string>WQ Files</string>
+	<string>黑猫游戏工具箱</string>
 	<key>CFBundleExecutable</key>
 	<string>WQFiles</string>
 	<key>CFBundleIcons</key>
@@ -37,7 +37,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>WQFiles</string>
+	<string>黑猫游戏工具箱</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

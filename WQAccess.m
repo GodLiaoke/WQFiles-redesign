@@ -1,6 +1,6 @@
 //
 //  WQAccess.m
-//  WQ Files
+//  黑猫游戏工具箱
 //
 //  Sandbox extension technique: worse_query by Taj C (forcequit),
 //  https://github.com/forcequitOS/worse_query, GPL-3.0-or-later.
@@ -1022,7 +1022,7 @@ NSString *wq_permission_hint(NSString *path, BOOL forWriting)
     if (allowed) return nil;
     NSString *owner = st.st_uid == 0 ? @"root" : [NSString stringWithFormat:@"uid %d", (int)st.st_uid];
     return [NSString stringWithFormat:@"This file belongs to %@ (mode %o) and only its owner may %@ it. "
-            "WQ Files reaches the folder, but runs as mobile (uid %d), so no app can %@ this file.",
+            "黑猫游戏工具箱 reaches the folder, but runs as mobile (uid %d), so no app can %@ this file.",
             owner, st.st_mode & 07777, forWriting ? @"change" : @"read", (int)me, forWriting ? @"change" : @"open"];
 }
 
@@ -1714,7 +1714,7 @@ static BOOL wq_fsgetpath_sees_others(fsid_t fsid, int64_t maxInode, double *idsP
             [areas addObject:wq_sample_area(path)];
         }
     }
-    wq_log(@"scan: fsgetpath sample: %lu of %lu ids resolve, %lu outside WQ Files (ids up to %lld, %.1f s)",
+    wq_log(@"scan: fsgetpath sample: %lu of %lu ids resolve, %lu outside 黑猫游戏工具箱 (ids up to %lld, %.1f s)",
            (unsigned long)resolved, (unsigned long)sampled, (unsigned long)foreign, (long long)maxInode,
            CFAbsoluteTimeGetCurrent() - started);
     if (areas.count) {
@@ -1969,7 +1969,7 @@ inodeScan:;
     }
     double sampleRate = 0;
     if (!cache && !wq_fsgetpath_sees_others(fsid, maxInode, &sampleRate)) {
-        wq_log(@"scan: on this iOS version fsgetpath only resolves WQ Files' own files, so containers can't be found by scanning");
+        wq_log(@"scan: on this iOS version fsgetpath only resolves 黑猫游戏工具箱' own files, so containers can't be found by scanning");
         return nil;
     }
     WQScanCancellation *stop = nil;

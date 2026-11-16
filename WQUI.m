@@ -1,6 +1,6 @@
 //
 //  WQUI.m
-//  WQ Files shared UI helpers
+//  黑猫游戏工具箱 shared UI helpers
 //  GPL-3.0-or-later.
 //
 
