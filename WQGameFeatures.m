@@ -37,7 +37,7 @@ static NSString *const WQGameRiskNote =
 @interface WQGameInjectViewController : UITableViewController <UIDocumentPickerDelegate>
 - (instancetype)initWithEntry:(NSDictionary *)entry;
 @end
-@interface WQGameLuaViewController : UITableViewController <UIDocumentPickerDelegate>
+@interface WQGameLuaViewController : UITableViewController <UIDocumentPickerDelegate, NSURLSessionDownloadDelegate>
 - (instancetype)initWithContainer:(NSString *)container relative:(NSString *)relative
                             alias:(NSString *_Nullable)alias;
 @end
@@ -782,18 +782,11 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     });
 }
 
-- (NSDictionary *)wq_exactApp
-{
-    for (NSDictionary *a in _apps)
-        if ([a[@"exact"] boolValue]) return a;
-    return nil;
-}
-
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    if (section == 2) return ([self wq_exactApp] ? 2 : 0) + 3;
+    if (section == 2) return 3;   // 快捷操作
     if (section == 1) return (NSInteger)_visiblePaths.count + 1;   // + add-path row
     if (_detecting && !_apps.count) return 1;
     if (!_apps.count) return 3;   // status + 查看日志 + 手动填写
@@ -828,7 +821,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
         NSString *how = @"搜索支持名称、应用标识、容器 UUID 与完整路径；多个关键词用空格分隔，完全相等的结果排最前。搜索时不限 5 个，点「显示全部」可展开完整列表。";
         return [NSString stringWithFormat:@"%@。%@\n\n三角洲行动按已验证的特征目录识别；其余游戏只按应用标识排序推荐，不猜测资源目录。长按任意行可复制容器路径。", count, how];
     }
-    if (section == 2) return @"三角洲行动的两个动作各占一行，标签居左、箭头居右；记录、校验与配置都不改动游戏文件。";
+    if (section == 2) return @"三角洲行动的两个动作在应用行右侧；记录、校验与配置都不改动游戏文件。";
     return @"搜索会同时过滤已保存路径。点按快捷放入资源文件，长按可复制完整路径；左滑只删除本应用的记录，不删除游戏里的文件。";
 }
 
@@ -847,18 +840,7 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
     NSArray<NSString *> *tokens = _queryTokens;
 
     if (indexPath.section == 2) {
-        NSUInteger prefix = [self wq_exactApp] ? 2 : 0;
-        NSUInteger row = (NSUInteger)indexPath.row;
-        if (row < prefix) {
-            cell.textLabel.text = row == 0 ? @"一键部署默认路径" : @"注入 Lua";
-            cell.detailTextLabel.text = row == 0
-                ? @"逐级检测并创建 LuaDebug 目录链，保存为注入路径"
-                : @"自定义 / 官方版 / 第三方版三种方式";
-            cell.imageView.image = WQLinearIcon(row == 0 ? @"folder" : @"chevron.left.forwardslash.chevron.right");
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            return cell;
-        }
-        NSUInteger idx = row - prefix;
+        NSUInteger idx = (NSUInteger)indexPath.row;
         NSArray *titles = @[@"注入记录", @"文件校验", @"配置导入 / 导出"];
         NSArray *subtitles = @[@"查看最近写入结果，最多 200 条", @"流式计算 SHA-256 与文件大小",
                                @"导出或合并注入路径与路径收藏"];
@@ -916,10 +898,44 @@ static void WQGameEmphasize(UILabel *label, NSString *text, NSArray<NSString *> 
             WQGameEmphasize(cell.textLabel, title, tokens, WQFontBody(), WQColorText());
             WQGameEmphasize(cell.detailTextLabel, subtitle, tokens, WQFontCaption(), WQColorText2());
             cell.imageView.image = WQLinearIcon(exact ? @"checkmark.square" : @"app.dashed");
-            // No wide accessoryView: a 200pt two-button stack squeezed the
-            // title/subtitle on narrow screens. Both actions now live as their
-            // own single-line rows in the "快捷操作" section below.
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            cell.detailTextLabel.numberOfLines = 2;
+            if (exact) {
+                // Both actions sit on the right of the verified Delta row, like
+                // the previous build, but in a 140pt stack instead of 200pt.
+                // 60pt rows + 2-line subtitles leave enough room on narrow
+                // screens, so nothing overlaps.
+                UIButton *deploy = [UIButton buttonWithType:UIButtonTypeSystem];
+                [deploy setTitle:@"一键部署" forState:UIControlStateNormal];
+                WQStylePrimaryButton(deploy);
+                deploy.titleLabel.font = WQFontCaption();
+                deploy.titleLabel.adjustsFontSizeToFitWidth = YES;
+                deploy.titleLabel.minimumScaleFactor = 0.8;
+                deploy.tag = (NSInteger)idx;
+                [deploy addTarget:self action:@selector(quickDeployTapped:)
+                 forControlEvents:UIControlEventTouchUpInside];
+
+                UIButton *lua = [UIButton buttonWithType:UIButtonTypeSystem];
+                [lua setTitle:@"注入 Lua" forState:UIControlStateNormal];
+                WQStyleControl(lua);
+                [lua setTitleColor:WQColorText() forState:UIControlStateNormal];
+                lua.titleLabel.font = WQFontCaption();
+                lua.titleLabel.adjustsFontSizeToFitWidth = YES;
+                lua.titleLabel.minimumScaleFactor = 0.8;
+                lua.tag = (NSInteger)idx;
+                [lua addTarget:self action:@selector(luaInjectedTapped:)
+                 forControlEvents:UIControlEventTouchUpInside];
+
+                UIStackView *actions = [[UIStackView alloc] initWithFrame:CGRectMake(0, 0, 140, 30)];
+                actions.axis = UILayoutConstraintAxisHorizontal;
+                actions.alignment = UIStackViewAlignmentFill;
+                actions.distribution = UIStackViewDistributionFillEqually;
+                actions.spacing = WQSpace1;
+                [actions addArrangedSubview:deploy];
+                [actions addArrangedSubview:lua];
+                cell.accessoryView = actions;
+            } else {
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            }
         }
     } else {
         NSUInteger idx = (NSUInteger)indexPath.row;
@@ -967,14 +983,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 2) {
         [self.view endEditing:YES];
-        NSUInteger prefix = [self wq_exactApp] ? 2 : 0;
-        NSUInteger row = (NSUInteger)indexPath.row;
-        if (row < prefix) {
-            if (row == 0) [self quickDeployTapped:nil];
-            else [self luaInjectedTapped:nil];
-            return;
-        }
-        NSUInteger idx = row - prefix;
+        NSUInteger idx = (NSUInteger)indexPath.row;
         UIViewController *vc = nil;
         if (idx == 0) vc = [WQInjectionHistoryViewController new];
         else if (idx == 1) vc = [WQFileInspectorViewController new];
@@ -1022,9 +1031,9 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
 
 - (void)quickDeployTapped:(UIButton *)sender
 {
-    (void)sender;
-    NSDictionary *a = [self wq_exactApp];
-    if (!a) { wq_alert(self, @"未检测到", @"请先检测应用容器，或手动添加注入路径。"); return; }
+    if (!sender || (NSUInteger)sender.tag >= _visibleApps.count) return;
+    NSDictionary *a = _visibleApps[(NSUInteger)sender.tag];
+    if (![a[@"exact"] boolValue]) return;
     NSString *container = a[@"path"];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"一键部署默认路径"
         message:[NSString stringWithFormat:@"目标：\n%@/%@\n\n逐级检测目录，已存在保留、缺失才新建，并保存为注入路径。\n\n%@",
@@ -1081,9 +1090,9 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoin
 
 - (void)luaInjectedTapped:(UIButton *)sender
 {
-    (void)sender;
-    NSDictionary *a = [self wq_exactApp];
-    if (!a) { wq_alert(self, @"未检测到", @"请先检测应用容器，或手动添加注入路径。"); return; }
+    if (!sender || (NSUInteger)sender.tag >= _visibleApps.count) return;
+    NSDictionary *a = _visibleApps[(NSUInteger)sender.tag];
+    if (![a[@"exact"] boolValue]) return;
     [self.view endEditing:YES];
     WQGameLuaViewController *vc = [[WQGameLuaViewController alloc]
         initWithContainer:a[@"path"] relative:WQGameExactChain alias:@"默认注入路径"];
@@ -1742,13 +1751,6 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 @end
 
 
-#pragma mark - Delta Force default Lua injection
-
-// Three explicit, user-driven sources for the verified LuaDebug chain. None of
-// them hide, disguise, auto-run or defeat any integrity check: this is the same
-// plain file write used by the general resource importer, with an extra network
-// source and a development notice. The "official" option writes nothing.
-
 // Runs on the shared IO queue. wq_list / wq_stat obtain sandbox tokens
 // when needed, so this works on iOS 26 and iOS 27 alike.
 static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
@@ -1770,11 +1772,23 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
     }];
     return out;
 }
+
+#pragma mark - Delta Force default Lua injection
+
+// Three explicit, user-driven sources for the verified LuaDebug chain. None of
+// them hide, disguise, auto-run or defeat any integrity check: this is the same
+// plain file write used by the general resource importer, with an extra network
+// source and a development notice. The "official" option writes nothing.
+
 @implementation WQGameLuaViewController {
-    NSString *_container, *_relative, *_target, *_alias, *_status, *_chainStatus, *_luaDebug;
+    NSString *_container, *_relative, *_target, *_alias, *_luaDebug;
+    NSString *_chainStatus, *_status, *_downloadText;
     NSArray<NSDictionary *> *_items;
     NSURLSession *_session;
-    BOOL _chainReady, _checked;
+    NSURLSessionDownloadTask *_downloadTask;
+    NSString *_stageLocal, *_stageError;   // delegate queue only
+    double _downloadProgress;
+    BOOL _chainReady, _checked, _downloading;
 }
 
 - (instancetype)initWithContainer:(NSString *)container relative:(NSString *)relative
@@ -1788,6 +1802,7 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
         _luaDebug = [_container stringByAppendingPathComponent:WQGameLuaDebugChain];
         _status = @"尚未注入";
         _chainStatus = @"正在检测目录…";
+        _downloadText = @"";
         _items = @[];
     }
     return self;
@@ -1805,16 +1820,27 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
                                         target:self action:@selector(refreshTapped)];
     NSURLSessionConfiguration *cfg = NSURLSessionConfiguration.defaultSessionConfiguration;
     cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
-    _session = [NSURLSession sessionWithConfiguration:cfg];
+    // A serial background delegate queue: file staging happens off the main
+    // thread, UI updates are dispatched back explicitly.
+    _session = [NSURLSession sessionWithConfiguration:cfg delegate:self delegateQueue:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    // First entry: check every directory in the chain and create only the
-    // missing levels. Returning from the file browser only refreshes the list.
+    // First entry: detect every level and create only the missing ones.
     if (!_checked) { _checked = YES; [self ensureChainAndRefresh]; }
     else [self refreshItems];
+}
+
+- (void)viewDidDisappear:(BOOL)animated
+{
+    [super viewDidDisappear:animated];
+    if (self.isMovingFromParentViewController || self.isBeingDismissed) {
+        // NSURLSession retains its delegate; invalidate to break the cycle.
+        [_downloadTask cancel];
+        [_session invalidateAndCancel];
+    }
 }
 
 - (void)setStatus:(NSString *)text
@@ -1828,7 +1854,6 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
     _chainReady = ready;
     [self.tableView reloadData];
 }
-
 - (void)copyText:(NSString *)text
 {
     UIPasteboard.generalPasteboard.string = text;
@@ -1840,10 +1865,10 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
     });
 }
 
-#pragma mark - Directory chain: detect, create, list
+#pragma mark - Directory chain
 
-// Runs on the shared IO queue. wq_list / wq_stat already obtain sandbox tokens
-// when needed, so this works on iOS 26 and iOS 27 alike.
+// Runs on the shared IO queue. wq_list / wq_stat obtain sandbox tokens when
+// needed, so this works on iOS 26 and iOS 27 alike.
 - (void)ensureChainAndRefresh
 {
     [self setChainStatus:@"正在检测目录…" ready:NO];
@@ -1889,27 +1914,32 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
 - (void)refreshTapped
 {
     [self.view endEditing:YES];
+    if (_downloading) {
+        [_downloadTask cancel];
+        _downloading = NO;
+        _downloadTask = nil;
+        _downloadText = @"已取消下载";
+    }
     [_session invalidateAndCancel];
-    _session = [NSURLSession sessionWithConfiguration:
-        NSURLSessionConfiguration.defaultSessionConfiguration];
+    NSURLSessionConfiguration *cfg = NSURLSessionConfiguration.defaultSessionConfiguration;
+    cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    _session = [NSURLSession sessionWithConfiguration:cfg delegate:self delegateQueue:nil];
     [self ensureChainAndRefresh];
     [self setStatus:@"已刷新目录"];
 }
 
-#pragma mark - Table
+#pragma mark - Table: four clear sections
 
 - (NSArray<NSString *> *)sectionTitles
 {
-    return @[@"默认注入 Lua", @"目录状态", @"目录浏览", @"LuaDebug 内容", @"说明与状态", @"危险操作"];
+    return @[@"注入方式", @"目录", @"LuaDebug 内容", @"危险操作"];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return (NSInteger)[self sectionTitles].count; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if (section == 0) return 3;
-    if (section == 1) return 2;
-    if (section == 2) return 2;
-    if (section == 3) return (NSInteger)_items.count + 1;   // + refresh row
-    if (section == 4) return 2;
+    if (section == 1) return 4;
+    if (section == 2) return (NSInteger)_items.count + 1;   // + refresh row
     return 1;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
@@ -1920,24 +1950,20 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
 {
     if (section == 0)
         return [NSString stringWithFormat:
-            @"自定义导入：从「文件」App 选择 lua，按原文件名写入。官方版：仅显示开发进度提示，不下载、不写入任何文件。第三方版：下载社区 lua 并写入。三种方式共用同一目标目录与覆盖备份逻辑。\n\n%@",
-            WQGameLuaThirdPartyNote];
+            @"自定义：从「文件」App 选 lua，按原文件名写入。官方版：只显示开发进度提示，不下载、不写入。第三方版：下载后写入，本行显示进度条与百分比。\n\n%@\n\n当前状态：%@\n\n%@",
+            WQGameLuaThirdPartyNote, _status, WQGameRiskNote];
     if (section == 1)
-        return @"进入本页时逐级检测 LuaDebug 目录链：已存在保留、缺失层级自动新建。点按路径可复制；点按状态行可重新检测。";
+        return @"首次进入自动逐级检测并补建缺失目录。点「目录链」重新检测，点目标路径复制；两个入口都走共享文件浏览器。写入前仍会再次校验目录链。";
     if (section == 2)
-        return @"跳转到共享文件浏览器，可直接查看、修改或删除 LuaDebug 任意层级的内容。";
-    if (section == 3)
-        return @"列出注入目录（LuaDebug/LuaSource/DFM/BusinessEntrance）中的文件与子目录。左滑可删除单条；删除文件会在「备份」保留副本，删除目录会连同内容一起移除。";
-    if (section == 4) return WQGameRiskNote;
-    return @"此操作只删除本机的 LuaDebug 目录，不改动游戏其他数据。删除后本页不会立刻重建，下次重新进入时会自动补建目录链。";
+        return @"左滑删除单条：文件在「备份」留副本，目录连同内容一起移除。点「刷新列表」重新读取。";
+    return @"删除 LuaDebug 整棵目录及其全部内容，不保留副本、无法撤销。删除后本页不立刻重建，下次进入自动补建目录链。";
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (indexPath.section == 0) return 60.0;   // two-line subtitles
-    if (indexPath.section == 1) return indexPath.row == 0 ? 60.0 : 92.0;   // status / 3-line path
-    if (indexPath.section == 2) return 56.0;
-    if (indexPath.section == 3) return 56.0;
-    if (indexPath.section == 4) return indexPath.row == 0 ? 76.0 : 60.0;
+    NSUInteger section = (NSUInteger)indexPath.section;
+    if (section == 0) return 60.0;
+    if (section == 1) return indexPath.row == 1 ? 92.0 : 56.0;   // 3-line path
+    if (section == 2) return 56.0;
     return 56.0;
 }
 
@@ -1947,8 +1973,8 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
     cell.accessoryType = UITableViewCellAccessoryNone;
     cell.accessoryView = nil;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    NSUInteger row = (NSUInteger)indexPath.row;
     NSUInteger section = (NSUInteger)indexPath.section;
+    NSUInteger row = (NSUInteger)indexPath.row;
 
     if (section == 0) {
         NSArray<NSString *> *titles = @[@"自定义导入", @"官方版", @"第三方版"];
@@ -1959,29 +1985,41 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
         ];
         NSArray<NSString *> *icons = @[@"square.and.arrow.down", @"info.circle", @"arrow.down.circle"];
         cell.textLabel.text = titles[row];
-        cell.detailTextLabel.text = subs[row];
         cell.imageView.image = WQLinearIcon(icons[row]);
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        if (row == 2 && _downloading) {
+            UIProgressView *progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
+            progress.frame = CGRectMake(0, 0, 92, 4);
+            progress.progressTintColor = WQColorStrong();
+            progress.trackTintColor = WQColorLine();
+            progress.progress = (float)_downloadProgress;
+            cell.accessoryView = progress;
+            cell.detailTextLabel.text = _downloadText.length ? _downloadText : @"正在下载…";
+            cell.detailTextLabel.numberOfLines = 2;
+        } else {
+            cell.detailTextLabel.text = (row == 2 && _downloadText.length)
+                ? _downloadText : subs[row];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        }
     } else if (section == 1) {
         if (row == 0) {
             cell.textLabel.text = @"目录链";
             cell.detailTextLabel.text = _chainStatus;
             cell.imageView.image = WQLinearIcon(_chainReady ? @"checkmark.circle" : @"clock");
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        } else {
+        } else if (row == 1) {
             cell.textLabel.text = _target;
             cell.textLabel.font = WQFontValue();
             cell.textLabel.numberOfLines = 3;
             cell.detailTextLabel.text = @"点按复制完整路径";
             cell.imageView.image = WQLinearIcon(@"folder");
+        } else {
+            cell.textLabel.text = row == 2 ? @"打开 LuaDebug 根目录" : @"打开注入目录";
+            cell.detailTextLabel.text = row == 2 ? _luaDebug : _target;
+            cell.detailTextLabel.numberOfLines = 2;
+            cell.imageView.image = WQLinearIcon(row == 2 ? @"folder" : @"folder.badge.plus");
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         }
     } else if (section == 2) {
-        cell.textLabel.text = row == 0 ? @"打开 LuaDebug 根目录" : @"打开注入目录";
-        cell.detailTextLabel.text = row == 0 ? _luaDebug : _target;
-        cell.detailTextLabel.numberOfLines = 2;
-        cell.imageView.image = WQLinearIcon(row == 0 ? @"folder" : @"folder.badge.plus");
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else if (section == 3) {
         if (row >= _items.count) {
             cell.textLabel.text = @"刷新列表";
             cell.detailTextLabel.text = _items.count
@@ -1997,19 +2035,6 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
                 ? @"目录 · 左滑可连同内容删除"
                 : [NSString stringWithFormat:@"文件 · %@", wq_size_text([item[@"size"] unsignedLongLongValue])];
             cell.imageView.image = WQLinearIcon(dir ? @"folder" : @"doc");
-        }
-    } else if (section == 4) {
-        if (row == 0) {
-            cell.textLabel.text = @"第三方版说明";
-            cell.detailTextLabel.text = WQGameLuaThirdPartyNote;
-            cell.detailTextLabel.numberOfLines = 3;
-            cell.imageView.image = WQLinearIcon(@"info.circle");
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        } else {
-            cell.textLabel.text = @"状态";
-            cell.detailTextLabel.text = _status;
-            cell.imageView.image = WQLinearIcon(@"clock");
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
         }
     } else {
         cell.textLabel.text = @"清空 LuaDebug 整棵目录";
@@ -2033,27 +2058,25 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
     }
     if (section == 1) {
         if (row == 0) [self ensureChainAndRefresh];
-        else [self copyText:_target];
+        else if (row == 1) [self copyText:_target];
+        else {
+            [self.view endEditing:YES];
+            WQOpenPathFromExtras(self.navigationController, row == 2 ? _luaDebug : _target);
+        }
         return;
     }
-    if (section == 2) {
-        [self.view endEditing:YES];
-        WQOpenPathFromExtras(self.navigationController, row == 0 ? _luaDebug : _target);
-        return;
-    }
-    if (section == 3) { if (row >= _items.count) [self refreshItems]; return; }
-    if (section == 4) return;
+    if (section == 2) { if (row >= _items.count) [self refreshItems]; return; }
     [self purgeLuaDebugTapped];
 }
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    return indexPath.section == 3 && (NSUInteger)indexPath.row < _items.count;
+    return indexPath.section == 2 && (NSUInteger)indexPath.row < _items.count;
 }
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
  forRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.section != 3 ||
+    if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.section != 2 ||
         (NSUInteger)indexPath.row >= _items.count) return;
     [self deleteItem:_items[(NSUInteger)indexPath.row]];
 }
@@ -2098,7 +2121,7 @@ static NSArray<NSDictionary *> *WQLuaListItems(NSString *dir)
 {
     NSString *luaDebug = _luaDebug;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空 LuaDebug？"
-        message:[NSString stringWithFormat:@"%@\n\n将删除该目录及其全部子目录与文件（包括 LuaSource、DFM、BusinessEntrance 和所有已注入的 lua）。\n\n不保留副本，无法撤销。此操作只清理本机调试目录，不改动游戏其他数据。删除后本页不会立刻重建，下次重新进入时会自动补建目录链。",
+        message:[NSString stringWithFormat:@"%@\n\n将删除该目录及其全部子目录与文件（包括 LuaSource、DFM、BusinessEntrance 和所有已注入的 lua）。\n\n不保留副本，无法撤销。删除后本页不会立刻重建，下次重新进入时会自动补建目录链。",
             luaDebug]
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
@@ -2171,80 +2194,146 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     [self confirmWriteLocal:local name:name source:@"自定义导入"];
 }
 
-#pragma mark - Third-party download
+#pragma mark - Third-party download with a real progress bar
 
 - (void)thirdPartyTapped
 {
+    if (_downloading) {
+        [_downloadTask cancel];
+        _downloading = NO;
+        _downloadTask = nil;
+        _downloadText = @"已取消下载";
+        [self setStatus:@"已取消下载"];
+        return;
+    }
+    _stageLocal = nil;
+    _stageError = nil;
+    _downloadProgress = 0.0;
+    _downloading = YES;
+    _downloadText = @"正在下载 0%";
     [self setStatus:@"正在下载…"];
     NSURL *url = [NSURL URLWithString:WQGameLuaThirdPartyURL];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:30.0];
+    _downloadTask = [_session downloadTaskWithRequest:request];
+    [_downloadTask resume];
+}
+
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask
+      didWriteData:(int64_t)bytesWritten
+ totalBytesWritten:(int64_t)totalBytesWritten
+ totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite
+{
+    (void)session; (void)downloadTask; (void)bytesWritten;
+    double frac = totalBytesExpectedToWrite > 0
+        ? (double)totalBytesWritten / (double)totalBytesExpectedToWrite : 0.0;
+    if (frac < 0.0) frac = 0.0;
+    if (frac > 1.0) frac = 1.0;
+    NSString *text = totalBytesExpectedToWrite > 0
+        ? [NSString stringWithFormat:@"正在下载 %d%% · %@ / %@",
+            (int)(frac * 100.0), wq_size_text((unsigned long long)totalBytesWritten),
+            wq_size_text((unsigned long long)totalBytesExpectedToWrite)]
+        : [NSString stringWithFormat:@"正在下载 · 已接收 %@",
+            wq_size_text((unsigned long long)totalBytesWritten)];
     __weak typeof(self) weakSelf = self;
-    NSURLSessionDownloadTask *task = [_session downloadTaskWithRequest:request
-        completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
-            NSString *failure = nil;
-            __block NSString *local = nil;
-            if (error) failure = error.localizedDescription ?: @"网络请求失败";
-            else if (![response isKindOfClass:NSHTTPURLResponse.class]) failure = @"响应不是 HTTP";
-            else {
-                NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
-                if (http.statusCode != 200)
-                    failure = [NSString stringWithFormat:@"源站返回 HTTP %ld", (long)http.statusCode];
-                else {
-                    NSString *type = [(NSString *)(http.allHeaderFields[@"Content-Type"] ?: @"") lowercaseString];
-                    if ([type containsString:@"json"] || [type containsString:@"html"])
-                        failure = @"源站返回了非文件内容（错误页）";
-                }
-            }
-            if (!failure) {
-                if (!location) failure = @"下载内容为空";
-                else {
-                    NSFileManager *fm = NSFileManager.defaultManager;
-                    local = [WQGameStagingDir() stringByAppendingPathComponent:WQGameLuaThirdPartyName];
-                    [fm removeItemAtPath:local error:nil];
-                    NSError *copyError = nil;
-                    if (![fm copyItemAtPath:location.path toPath:local error:&copyError])
-                        failure = copyError.localizedDescription ?: @"暂存下载文件失败";
-                    else {
-                        unsigned long long size = [[fm attributesOfItemAtPath:local error:nil][NSFileSize]
-                                                   unsignedLongLongValue];
-                        if (!size || size > WQGameLuaMaxBytes) {
-                            failure = [NSString stringWithFormat:@"文件大小异常（%@）", wq_size_text(size)];
-                            [fm removeItemAtPath:local error:nil];
-                            local = nil;
-                        }
-                    }
-                }
-            }
-            dispatch_async(dispatch_get_main_queue(), ^{
-                WQGameLuaViewController *v = weakSelf;
-                if (!v) return;
-                if (failure) {
-                    [v setStatus:[@"下载失败：" stringByAppendingString:failure]];
-                    wq_alert(v, @"下载失败", [NSString stringWithFormat:
-                        @"%@\n\n源站临时不可用或拒绝访问时，可改用「自定义导入」从「文件」App 选择本地 lua。",
-                        failure]);
-                    return;
-                }
-                wq_log(@"game: lua downloaded -> %@", local);
-                [v confirmWriteLocal:local name:WQGameLuaThirdPartyName source:@"第三方版"];
-            });
-        }];
-    [task resume];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        WQGameLuaViewController *v = weakSelf;
+        if (!v || !v->_downloading) return;
+        v->_downloadProgress = frac;
+        v->_downloadText = text;
+        NSIndexPath *row = [NSIndexPath indexPathForRow:2 inSection:0];
+        [v.tableView reloadRowsAtIndexPaths:@[row] withRowAnimation:UITableViewRowAnimationNone];
+    });
+}
+
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask
+ didFinishDownloadingToURL:(NSURL *)location
+{
+    (void)session; (void)downloadTask;
+    // location is only valid during this callback: stage it synchronously on
+    // the delegate's serial background queue.
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *local = [WQGameStagingDir() stringByAppendingPathComponent:WQGameLuaThirdPartyName];
+    [fm removeItemAtPath:local error:nil];
+    NSError *error = nil;
+    if (![fm copyItemAtPath:location.path toPath:local error:&error]) {
+        _stageLocal = nil;
+        _stageError = error.localizedDescription ?: @"暂存下载文件失败";
+        return;
+    }
+    unsigned long long size = [[fm attributesOfItemAtPath:local error:nil][NSFileSize] unsignedLongLongValue];
+    if (!size || size > WQGameLuaMaxBytes) {
+        _stageError = [NSString stringWithFormat:@"文件大小异常（%@）", wq_size_text(size)];
+        [fm removeItemAtPath:local error:nil];
+        _stageLocal = nil;
+        return;
+    }
+    _stageLocal = local;
+    _stageError = nil;
+}
+
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
+didCompleteWithError:(NSError * _Nullable)error
+{
+    (void)session;
+    if (error && error.code == NSURLErrorCancelled) return;   // handled by the cancel path
+    NSString *failure = error ? (error.localizedDescription ?: @"网络请求失败") : nil;
+    if (!failure) failure = _stageError;
+    if (!failure && !_stageLocal) failure = @"下载内容为空";
+    if (!failure) {
+        NSHTTPURLResponse *http = [task.response isKindOfClass:NSHTTPURLResponse.class]
+            ? (NSHTTPURLResponse *)task.response : nil;
+        if (!http) failure = @"响应不是 HTTP";
+        else if (http.statusCode != 200)
+            failure = [NSString stringWithFormat:@"源站返回 HTTP %ld", (long)http.statusCode];
+        else {
+            NSString *type = [(NSString *)(http.allHeaderFields[@"Content-Type"] ?: @"") lowercaseString];
+            if ([type containsString:@"json"] || [type containsString:@"html"])
+                failure = @"源站返回了非文件内容（错误页）";
+        }
+    }
+    if (failure && _stageLocal) {
+        [NSFileManager.defaultManager removeItemAtPath:_stageLocal error:nil];
+        _stageLocal = nil;
+    }
+    NSString *local = _stageLocal;
+    NSString *text = failure ? [@"下载失败：" stringByAppendingString:failure]
+                             : @"下载完成 100% · 待确认写入";
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        WQGameLuaViewController *v = weakSelf;
+        if (!v || !v->_downloading) return;
+        v->_downloading = NO;
+        v->_downloadTask = nil;
+        v->_downloadProgress = failure ? 0.0 : 1.0;
+        v->_downloadText = text;
+        v->_status = text;
+        [v.tableView reloadData];
+        if (failure) {
+            wq_alert(v, @"下载失败", [NSString stringWithFormat:
+                @"%@\n\n可改用「自定义导入」从「文件」App 选择本地 lua。", failure]);
+            return;
+        }
+        wq_log(@"game: lua downloaded -> %@", local);
+        [v confirmWriteLocal:local name:WQGameLuaThirdPartyName source:@"第三方版"];
+    });
 }
 
 #pragma mark - Shared write path
 
 - (void)confirmWriteLocal:(NSString *)local name:(NSString *)name source:(NSString *)source
 {
-    [self setStatus:[NSString stringWithFormat:@"%@ · 待确认", source]];
+    [self setStatus:[NSString stringWithFormat:@"%@ · 待确认写入", source]];
     NSString *target = _target;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"确认注入 Lua"
         message:[NSString stringWithFormat:@"方式：%@\n文件：%@\n目标目录：%@\n\n"
                  @"若目标目录缺失会逐级创建；同名文件会被替换，替换前在「备份」中保留副本。\n\n%@",
                  source, name, target, WQGameRiskNote]
         preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel
+        handler:^(UIAlertAction *__unused a) {
+            [self setStatus:@"已取消写入"];
+        }]];
     __weak typeof(self) weakSelf = self;
     [alert addAction:[UIAlertAction actionWithTitle:@"写入" style:UIAlertActionStyleDestructive
         handler:^(UIAlertAction *__unused action) {
@@ -2289,10 +2378,13 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             if (!v) return;
             if (failure) {
                 [v setStatus:[@"失败：" stringByAppendingString:failure]];
+                v->_downloadText = @"下载完成 · 写入失败，可重试";
+                [v.tableView reloadData];
                 wq_alert(v, @"注入失败", failure);
                 return;
             }
             [NSFileManager.defaultManager removeItemAtPath:local error:nil];
+            v->_downloadText = @"已下载并写入目标目录";
             [v setStatus:[NSString stringWithFormat:@"已写入 %@ · %@ · %@",
                           name, source, wq_size_text(size)]];
             WQRecordInjection(@{@"target": target, @"game": WQGameExactName, @"alias": alias,
