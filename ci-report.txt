@@ -1,4 +1,4 @@
-run_id=44066009048
+run_id=45378892796
 sdk=success tests=success build=success
 --- xcode / sdk inventory ---
 == runner ==
@@ -90,8 +90,8 @@ PASS: explicit small bound still supports successful empty enumeration
 PASS: overflowing scan bound is rejected before work dispatch
 
 == WQAccessTreeTests ==
-PASS: race preserves whichever destination wins exclusion
 PASS: write temp sentinel
+PASS: write racing creator
 PASS: race preserves whichever destination wins exclusion
 
 == WQAccessMeasureTests ==
@@ -105,8 +105,8 @@ PASS: tree copy preserves symlink item without following it
 PASS: copied symlink remains a symlink
 
 == WQAppsCopyTests ==
-2026-11-17 10:34:23.896 WQAppsCopyTests[1439:6769] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-AE3F8C8E-5305-47FB-8E3A-45A5CD0E7C06/src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-AE3F8C8E-5305-47FB-8E3A-45A5CD0E7C06/dst (3 items) OK
-2026-11-17 10:34:23.900 WQAppsCopyTests[1439:6769] [wqfiles] copy: /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-AE3F8C8E-5305-47FB-8E3A-45A5CD0E7C06/empty-src -> /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/WQAppsCopyTests-AE3F8C8E-5305-47FB-8E3A-45A5CD0E7C06/empty-dst (0 items) OK
+2026-11-24 10:52:58.324 WQAppsCopyTests[1547:7374] [wqfiles] copy: /private/var/folders/9d/l02zfgrs7c16twd3wbpdmhkc0000gn/T/WQAppsCopyTests-B3C8082E-C451-44E4-A950-BB4C1E279D82/src -> /private/var/folders/9d/l02zfgrs7c16twd3wbpdmhkc0000gn/T/WQAppsCopyTests-B3C8082E-C451-44E4-A950-BB4C1E279D82/dst (3 items) OK
+2026-11-24 10:52:58.326 WQAppsCopyTests[1547:7374] [wqfiles] copy: /private/var/folders/9d/l02zfgrs7c16twd3wbpdmhkc0000gn/T/WQAppsCopyTests-B3C8082E-C451-44E4-A950-BB4C1E279D82/empty-src -> /private/var/folders/9d/l02zfgrs7c16twd3wbpdmhkc0000gn/T/WQAppsCopyTests-B3C8082E-C451-44E4-A950-BB4C1E279D82/empty-dst (0 items) OK
 All Apps copy regression tests passed.
 
 == WQAppsSupportTests ==
@@ -126,7 +126,7 @@ All LaunchServices regression tests passed.
 == Python release and static UI checks ==
 
 ----------------------------------------------------------------------
-Ran 16 tests in 0.961s
+Ran 16 tests in 1.059s
 
 OK
 browser UI regression checks: PASS
@@ -136,6 +136,6 @@ iOS syntax and link checks: PASS
 Info.plist: OK
 entitlements.plist: OK
 
-All requested regression suites passed. Logs retained in: /Users/runner/work/WQFiles-redesign/WQFiles-redesign/.work/tests/all.3UGoaM
+All requested regression suites passed. Logs retained in: /Users/runner/work/WQFiles-redesign/WQFiles-redesign/.work/tests/all.OrN6hs
 --- build (tail) ---
 wrote /Users/runner/work/WQFiles-redesign/WQFiles-redesign/WQFiles.ipa
