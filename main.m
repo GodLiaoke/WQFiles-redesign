@@ -74,6 +74,9 @@ static BOOL wq_regular_file_for_ui(NSString *path)
 @property (nonatomic) uid_t uid;
 @property (nonatomic, strong) NSDate *modified;
 @property (nonatomic, strong) NSDate *created;
+// Relative to the folder whose recursive search produced this hit. Nil for
+// ordinary single-folder listings.
+@property (nonatomic, copy) NSString *relativePath;
 @end
 
 @implementation WQItem
@@ -593,11 +596,106 @@ static NSString *wq_index_letter(NSString *name)
     return (c >= 'A' && c <= 'Z') ? [NSString stringWithCharacters:&c length:1] : @"#";
 }
 
+#pragma mark - Recursive file search (opt-in scope)
+
+// Space-separated terms are ANDed and matched against the whole relative path,
+// so "DFM lua" finds Lua files under a DFM folder. Case/accents are ignored.
+static NSArray<NSString *> *WQDeepTokens(NSString *text)
+{
+    NSMutableArray<NSString *> *out = [NSMutableArray new];
+    for (NSString *part in [text componentsSeparatedByCharactersInSet:
+                            NSCharacterSet.whitespaceAndNewlineCharacterSet]) {
+        NSString *t = [part stringByTrimmingCharactersInSet:
+                       NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (t.length) [out addObject:t];
+    }
+    return out;
+}
+
+// Iterative depth-first walk with hard bounds. Symbolic links are never
+// followed; unreadable folders are skipped rather than reported as errors.
+// Runs on wq_io(). wq_list obtains sandbox tokens for each folder it opens.
+static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> *tokens,
+                                            WQScanCancellation *cancellation,
+                                            void (^progress)(NSUInteger dirs, NSUInteger found),
+                                            BOOL *truncatedOut)
+{
+    const NSUInteger kMaxDepth = 12;
+    const NSUInteger kMaxDirs = 1500;
+    const NSUInteger kMaxHits = 400;
+    NSStringCompareOptions opts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+    NSMutableArray<WQItem *> *hits = [NSMutableArray new];
+    NSMutableArray<NSDictionary *> *stack = [NSMutableArray arrayWithObject:
+        @{@"path": root, @"rel": @"", @"depth": @0}];
+    NSUInteger dirs = 0;
+    BOOL truncated = NO;
+
+    while (stack.count && !cancellation.isCancelled) {
+        NSDictionary *frame = stack.lastObject;
+        [stack removeLastObject];
+        if (dirs >= kMaxDirs) { truncated = YES; break; }
+        dirs++;
+        NSString *dir = frame[@"path"];
+        NSString *rel = frame[@"rel"];
+        NSUInteger depth = [frame[@"depth"] unsignedIntegerValue];
+        NSArray<NSString *> *names = wq_list(dir, nil);
+        if (!names) continue;
+        if (dirs % 10 == 0) progress(dirs, hits.count);
+        for (NSString *name in names) {
+            if (cancellation.isCancelled) break;
+            if (!name.length || [name isEqualToString:@"."] || [name isEqualToString:@".."]) continue;
+            NSString *full = [dir stringByAppendingPathComponent:name];
+            NSString *relative = rel.length ? [rel stringByAppendingPathComponent:name] : name;
+            struct stat st = {0};
+            if (lstat(full.fileSystemRepresentation, &st) != 0 && !wq_stat(full, &st)) continue;
+            BOOL isDir = S_ISDIR(st.st_mode);
+            BOOL isLink = S_ISLNK(st.st_mode);
+            BOOL matched = YES;
+            for (NSString *token in tokens)
+                if ([relative rangeOfString:token options:opts].location == NSNotFound) { matched = NO; break; }
+            if (matched) {
+                WQItem *item = [WQItem new];
+                item.name = name;
+                item.path = full;
+                item.relativePath = relative;
+                item.isDir = isDir;
+                item.isLink = isLink;
+                item.isRegular = S_ISREG(st.st_mode);
+                item.size = (unsigned long long)st.st_size;
+                item.mode = st.st_mode;
+                item.uid = st.st_uid;
+                item.modified = [NSDate dateWithTimeIntervalSince1970:st.st_mtimespec.tv_sec];
+                item.created = [NSDate dateWithTimeIntervalSince1970:st.st_birthtimespec.tv_sec];
+                [hits addObject:item];
+                if (hits.count >= kMaxHits) { truncated = YES; break; }
+            }
+            if (isDir && !isLink && depth + 1 < kMaxDepth)
+                [stack addObject:@{@"path": full, @"rel": relative, @"depth": @(depth + 1)}];
+        }
+        if (hits.count >= kMaxHits) break;
+    }
+    progress(dirs, hits.count);
+    if (truncatedOut) *truncatedOut = truncated || cancellation.isCancelled;
+    return hits;
+}
+
+
+@interface WQDirViewController ()
+- (BOOL)wq_deepActive;
+- (BOOL)wq_deepStatusRow;
+- (void)scheduleDeepSearch:(NSString *)query;
+@end
+
 @implementation WQDirViewController {
     NSString *_path;
     NSArray<WQItem *> *_all;     // everything in the folder
     NSArray<WQItem *> *_items;   // what the search lets through (shown)
     NSString *_query;
+    NSInteger _searchScope;              // 0 = this folder, 1 = include subfolders
+    NSArray<WQItem *> *_deepItems;       // recursive hits, already filtered
+    NSUInteger _deepGeneration;          // debounce + stale-result guard
+    WQScanCancellation *_deepCancellation;
+    NSString *_deepStatus;               // progress / empty-state line
     UILabel *_pathLabel;
     UIView *_headerBox;
     NSString *_scanStatus;
@@ -701,9 +799,15 @@ static NSString *wq_index_letter(NSString *name)
     UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
     search.searchResultsUpdater = self;
     search.obscuresBackgroundDuringPresentation = NO;
-    search.searchBar.placeholder = _labels ? @"Search names and bundle IDs" : @"Search this folder";
+    search.searchBar.placeholder = _labels ? @"搜索名称或标识" : @"搜索文件名或路径";
     search.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
     search.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
+    // Container parents list hundreds of app containers; recursing into all
+    // of them would be unbounded, so the deep scope is only offered inside a
+    // real folder. UISearchController calls the results updater on scope
+    // changes too, so no UISearchBarDelegate is needed (and its delegate is
+    // left to UISearchController itself).
+    if (!_labels) search.searchBar.scopeButtonTitles = @[@"当前文件夹", @"包含子目录"];
     self.navigationItem.searchController = search;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
@@ -761,7 +865,8 @@ static NSString *wq_index_letter(NSString *name)
     }
     // Zero-width spaces after each slash let lines break between components.
     NSString *breakable = [_path stringByReplacingOccurrencesOfString:@"/" withString:@"/\u200B"];
-    _pathLabel.text = _scanStatus ? [NSString stringWithFormat:@"%@\n%@", breakable, _scanStatus] : breakable;
+    NSString *status = _scanStatus ?: _deepStatus;
+    _pathLabel.text = status ? [NSString stringWithFormat:@"%@\n%@", breakable, status] : breakable;
     CGFloat side = 16, top = 42;
     CGSize fit = [_pathLabel sizeThatFits:CGSizeMake(width - 2 * side, CGFLOAT_MAX)];
     CGFloat height = top + ceil(fit.height) + 10;
@@ -791,14 +896,105 @@ static NSString *wq_index_letter(NSString *name)
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController
 {
     NSString *q = [searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    NSInteger scope = _labels ? 0 : searchController.searchBar.selectedScopeButtonIndex;
+    _searchScope = scope;
     _query = q.length ? q : nil;
+    if (scope == 1 && _query) {
+        [self scheduleDeepSearch:_query];
+        return;
+    }
+    [_deepCancellation cancel];
+    _deepGeneration++;
+    _deepItems = nil;
+    _deepStatus = nil;
     [self applyFilter];
     [self.tableView reloadData];
+    [self updateHeader];
 }
 
-// App name, bundle or group ID, or file name; case and accents ignored.
+- (BOOL)wq_deepActive { return _searchScope == 1 && _query.length > 0 && !_labels; }
+
+- (BOOL)wq_deepStatusRow
+{
+    return [self wq_deepActive] && !_error && _items.count == 0 && _deepStatus.length > 0;
+}
+
+// Debounce typing, then walk subfolders on the IO queue. Bounds live in
+// WQRecursiveSearch; every generation invalidates the previous scan.
+- (void)scheduleDeepSearch:(NSString *)query
+{
+    [_deepCancellation cancel];
+    WQScanCancellation *cancellation = [WQScanCancellation new];
+    _deepCancellation = cancellation;
+    NSUInteger generation = ++_deepGeneration;
+    _deepItems = nil;
+    _deepStatus = @"准备搜索子目录…";
+    [self applyFilter];
+    [self.tableView reloadData];
+    [self updateHeader];
+    NSString *root = _path;
+    NSArray<NSString *> *tokens = WQDeepTokens(query);
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        WQDirViewController *s = weakSelf;
+        if (!s || generation != s->_deepGeneration || cancellation.isCancelled) return;
+        dispatch_async(wq_io(), ^{
+            BOOL truncated = NO;
+            NSArray<WQItem *> *hits = WQRecursiveSearch(root, tokens, cancellation,
+                ^(NSUInteger dirs, NSUInteger found) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        WQDirViewController *v = weakSelf;
+                        if (!v || generation != v->_deepGeneration || cancellation.isCancelled) return;
+                        v->_deepStatus = [NSString stringWithFormat:
+                            @"正在搜索子目录… %lu 个目录 · %lu 项匹配",
+                            (unsigned long)dirs, (unsigned long)found];
+                        [v updateHeader];
+                    });
+                }, &truncated);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                WQDirViewController *v = weakSelf;
+                if (!v || generation != v->_deepGeneration) return;
+                if (cancellation.isCancelled) return;
+                v->_deepItems = hits;
+                v->_deepStatus = hits.count
+                    ? [NSString stringWithFormat:@"包含子目录 · %lu 项匹配%@",
+                        (unsigned long)hits.count, truncated ? @"（已达上限）" : @""]
+                    : @"子目录中没有匹配的文件";
+                [v applyFilter];
+                [v.tableView reloadData];
+                [v updateHeader];
+                wq_log(@"deep search: %lu hits under %@ (truncated=%d)",
+                       (unsigned long)hits.count, root, truncated ? 1 : 0);
+            });
+        });
+    });
+}
+
+// Scope 0 filters the current listing; scope 1 shows bounded recursive hits
+// sorted by their relative path (an alphabet index would not line up).
 - (void)applyFilter
 {
+    if ([self wq_deepActive]) {
+        NSArray<NSString *> *tokens = WQDeepTokens(_query);
+        NSArray<WQItem *> *shown = _deepItems ?: @[];
+        if (tokens.count) {
+            NSStringCompareOptions opts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+            shown = [shown filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:
+                ^BOOL(WQItem *item, NSDictionary *__unused b) {
+                    NSString *field = item.relativePath ?: item.name ?: @"";
+                    for (NSString *token in tokens)
+                        if ([field rangeOfString:token options:opts].location == NSNotFound) return NO;
+                    return YES;
+                }]];
+        }
+        _items = [shown sortedArrayUsingComparator:^NSComparisonResult(WQItem *a, WQItem *b) {
+            return [(a.relativePath ?: a.name ?: @"") localizedStandardCompare:
+                    (b.relativePath ?: b.name ?: @"")];
+        }];
+        _indexTitles = nil;
+        _indexRows = @{};
+        return;
+    }
     NSArray<WQItem *> *shown = _all ?: @[];
     if (_query) {
         NSStringCompareOptions opts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
@@ -1146,7 +1342,8 @@ static NSString *wq_index_letter(NSString *name)
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    return _error ? 1 : (NSInteger)_items.count;
+    if (_error || [self wq_deepStatusRow]) return 1;
+    return (NSInteger)_items.count;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -1154,6 +1351,19 @@ static NSString *wq_index_letter(NSString *name)
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"item"]
         ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"item"];
     UIListContentConfiguration *c = cell.defaultContentConfiguration;
+    if (!_error && [self wq_deepStatusRow]) {
+        c.text = _deepStatus ?: @"正在搜索子目录…";
+        c.secondaryText = @"递归搜索在后台进行，可继续输入关键词，或切回「当前文件夹」。";
+        c.secondaryTextProperties.numberOfLines = 2;
+        c.secondaryTextProperties.color = WQColorText2();
+        c.textProperties.color = WQColorText();
+        c.image = WQLinearIcon(@"magnifyingglass");
+        c.imageProperties.tintColor = WQColorText2();
+        cell.contentConfiguration = c;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        return cell;
+    }
     if (_error) {
         c.text = @"无法打开此文件夹";
         BOOL container = [_path containsString:@"/Containers/"] || [_path containsString:@"/SystemGroup/"];
@@ -1175,6 +1385,12 @@ static NSString *wq_index_letter(NSString *name)
     if (byCreated) date = [@"created " stringByAppendingString:date];
     NSString *detail = item.isDir ? date : [NSString stringWithFormat:@"%@ · %@", wq_size_text(item.size), date];
     if (item.label) detail = [NSString stringWithFormat:@"%@\n%@", item.name, detail];
+    if (item.relativePath.length) {
+        detail = [NSString stringWithFormat:@"%@\n%@", item.relativePath, detail];
+        c.secondaryTextProperties.numberOfLines = 3;
+    } else {
+        c.secondaryTextProperties.numberOfLines = 1;
+    }
     if (item.isLink) detail = [@"symlink · " stringByAppendingString:detail];
     c.secondaryText = detail;
     c.secondaryTextProperties.color = UIColor.secondaryLabelColor;
@@ -1196,6 +1412,7 @@ static NSString *wq_index_letter(NSString *name)
 
 - (NSIndexPath *)tableView:(UITableView *)tableView willSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
+    if ([self wq_deepStatusRow]) return nil;
     if (_error || indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
     if (!_selectingBackups) return indexPath;
     WQItem *item = _items[(NSUInteger)indexPath.row];
@@ -1255,7 +1472,7 @@ static NSString *wq_index_letter(NSString *name)
 // long-press menu (files are backed up first; backups only as whole units).
 - (UISwipeActionsConfiguration *)deleteSwipeForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (_selectingBackups || _error) return nil;
+    if (_selectingBackups || _error || [self wq_deepActive]) return nil;
     if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
     WQItem *item = _items[(NSUInteger)indexPath.row];
     BOOL backupUnit = item.isDir && wq_backup_unit_deletable(item.path);
@@ -1297,7 +1514,7 @@ static NSString *wq_index_letter(NSString *name)
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView
     contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point
 {
-    if (_selectingBackups || _error) return nil;
+    if (_selectingBackups || _error || [self wq_deepActive]) return nil;
     if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
     WQItem *item = _items[(NSUInteger)indexPath.row];
     NSString *itemPath = [item.path copy];

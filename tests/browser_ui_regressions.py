@@ -140,4 +140,17 @@ require(game, 'return @[@"注入方式", @"目录", @"LuaDebug 内容", @"危险
 forbid(game, '@"说明与状态"', "removed redundant status section")
 forbid(game, '@"目录状态"', "merged directory sections")
 
+require(main, "scopeButtonTitles = @[@\"当前文件夹\", @\"包含子目录\"]", "recursive search scope")
+require(main, "WQRecursiveSearch", "bounded recursive walk")
+require(main, "WQDeepTokens", "AND query tokens")
+require(main, "kMaxDirs = 1500", "directory bound")
+require(main, "kMaxHits = 400", "result bound")
+require(main, "kMaxDepth = 12", "depth bound")
+require(main, "isDir && !isLink", "symlinks are not followed")
+require(main, "WQScanCancellation *cancellation", "cancellable deep scan")
+require(main, "0.25 * NSEC_PER_SEC", "typing debounce")
+require(main, "relativePath", "hit location shown")
+require(main, "wq_deepActive", "deep results are read-only")
+forbid(main, "showsScopeBar = YES", "no always-on scope bar")
+
 print("browser UI regression checks: PASS")
