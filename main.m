@@ -684,11 +684,12 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 - (BOOL)wq_deepActive;
 - (BOOL)wq_deepStatusRow;
 - (void)scheduleDeepSearch:(NSString *)query;
-- (void)enterExportSelection;
-- (void)exitExportSelection;
-- (void)selectAllForExport;
+- (void)enterMultiSelection;
+- (void)exitMultiSelection;
+- (void)selectAllForMulti;
 - (void)exportSelectedAsZip;
-- (void)updateExportSelectionBar;
+- (void)deleteSelectedItems;
+- (void)updateMultiSelectionBar;
 @end
 
 @implementation WQDirViewController {
@@ -711,9 +712,9 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     BOOL _backupStorage;
     BOOL _selectingBackups;
     NSMutableSet<NSString *> *_selectedBackups;
-    BOOL _selectingExport;
-    NSMutableSet<NSString *> *_selectedExport;
-    UIBarButtonItem *_exportZipItem, *_exportDoneItem, *_exportAllItem;
+    BOOL _selectingMulti;
+    NSMutableSet<NSString *> *_selectedMulti;
+    UIBarButtonItem *_multiZipItem, *_multiDoneItem, *_multiAllItem, *_multiDeleteItem;
     UIBarButtonItem *_selectItem;
     UIBarButtonItem *_menuItem;
     UIBarButtonItem *_doneItem;
@@ -736,7 +737,7 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
         self.title = title ?: (path.lastPathComponent.length ? path.lastPathComponent : @"/");
         _baseTitle = self.title;
         _selectedBackups = [NSMutableSet new];
-        _selectedExport = [NSMutableSet new];
+        _selectedMulti = [NSMutableSet new];
         // Container parents: show bundle/group identifiers instead of UUIDs.
         NSString *parent = path.lastPathComponent;
         _labels = [@[@"Application", @"AppGroup", @"PluginKitPlugin", @"InternalDaemon", @"System"] containsObject:parent];
@@ -769,9 +770,9 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     // Container parents hold hundreds of app containers; multi-select ZIP is
     // offered only inside a real folder (including backup folders).
     if (!_labels) {
-        [menuItems addObject:[UIAction actionWithTitle:@"多选并压缩导出"
-            image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil
-            handler:^(UIAction *__unused a) { [weakSelf enterExportSelection]; }]];
+        [menuItems addObject:[UIAction actionWithTitle:@"多选"
+            image:[UIImage systemImageNamed:@"checkmark.circle"] identifier:nil
+            handler:^(UIAction *__unused a) { [weakSelf enterMultiSelection]; }]];
     }
     // Built when the menu opens, so the checkmarks show the current order.
     [menuItems addObject:[UIDeferredMenuElement elementWithUncachedProvider:^(void (^completion)(NSArray<UIMenuElement *> *)) {
@@ -844,7 +845,7 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 {
     [super viewWillDisappear:animated];
     if (_selectingBackups) [self exitBackupSelection];
-    if (_selectingExport) [self exitExportSelection];
+    if (_selectingMulti) [self exitMultiSelection];
     if (_scanInFlight) {
         _scanNeedsRefresh = YES;
         [_scanCancellation cancel];
@@ -1067,24 +1068,26 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     return paths;
 }
 
-#pragma mark - Multi-selection ZIP export
+#pragma mark - Standalone multi-selection: export or delete
 
-- (void)updateExportSelectionBar
+- (void)updateMultiSelectionBar
 {
-    NSUInteger count = _selectedExport.count;
-    _exportZipItem.title = [NSString stringWithFormat:@"导出 ZIP (%lu)", (unsigned long)count];
-    _exportZipItem.enabled = count > 0;
-    _exportAllItem.enabled = count < _items.count;
+    NSUInteger count = _selectedMulti.count;
+    _multiZipItem.title = [NSString stringWithFormat:@"导出 ZIP (%lu)", (unsigned long)count];
+    _multiZipItem.enabled = count > 0;
+    _multiDeleteItem.title = [NSString stringWithFormat:@"删除 (%lu)", (unsigned long)count];
+    _multiDeleteItem.enabled = count > 0;
+    _multiAllItem.enabled = count < _items.count;
 }
 
-- (void)enterExportSelection
+- (void)enterMultiSelection
 {
     if (_error || _items.count == 0) {
-        wq_alert(self, @"无法多选", @"当前文件夹没有可导出的项目。");
+        wq_alert(self, @"无法多选", @"当前文件夹没有可选择的项目。");
         return;
     }
-    // Leave any search/deep result set first: exporting works on the plain
-    // folder listing, where every leaf name is unique.
+    // Multi-select works on the plain folder listing, where each leaf name is
+    // unique. Leave any search / recursive result set before entering.
     [_deepCancellation cancel];
     _deepGeneration++;
     _deepItems = nil;
@@ -1097,31 +1100,58 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     search.searchBar.selectedScopeButtonIndex = 0;
     [self applyFilter];
     if (_selectingBackups) [self exitBackupSelection];
-    _selectingExport = YES;
-    [_selectedExport removeAllObjects];
-    if (!_exportZipItem) {
-        _exportZipItem = [[UIBarButtonItem alloc] initWithTitle:@"导出 ZIP" style:UIBarButtonItemStyleProminent
+    _selectingMulti = YES;
+    [_selectedMulti removeAllObjects];
+    if (!_multiZipItem) {
+        _multiZipItem = [[UIBarButtonItem alloc] initWithTitle:@"导出 ZIP" style:UIBarButtonItemStylePlain
             target:self action:@selector(exportSelectedAsZip)];
-        _exportDoneItem = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:UIBarButtonItemStylePlain
-            target:self action:@selector(exitExportSelection)];
-        _exportAllItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle"]
-            style:UIBarButtonItemStylePlain target:self action:@selector(selectAllForExport)];
-        _exportAllItem.accessibilityLabel = @"全选";
+        _multiDeleteItem = [[UIBarButtonItem alloc] initWithTitle:@"删除" style:UIBarButtonItemStylePlain
+            target:self action:@selector(deleteSelectedItems)];
+        _multiDeleteItem.tintColor = WQColorStrong();
+        _multiDoneItem = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:UIBarButtonItemStylePlain
+            target:self action:@selector(exitMultiSelection)];
+        _multiAllItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle"]
+            style:UIBarButtonItemStylePlain target:self action:@selector(selectAllForMulti)];
+        _multiAllItem.accessibilityLabel = @"全选";
     }
+    // A bottom toolbar keeps four actions readable on narrow screens; the nav
+    // bar keeps only its normal menu, so nothing overlaps the title.
     self.tableView.allowsMultipleSelection = NO;
     self.refreshControl.enabled = NO;
-    self.title = @"选择要导出的项目";
-    self.navigationItem.rightBarButtonItems = @[_exportAllItem, _exportZipItem, _exportDoneItem];
-    [self updateExportSelectionBar];
+    self.title = @"多选";
+    self.navigationItem.rightBarButtonItems = nil;
+    UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
+                                                                       target:nil action:nil];
+    BOOL canDelete = !self.readOnly && !_backupStorage;
+    NSMutableArray<UIBarButtonItem *> *tools = [NSMutableArray arrayWithObject:_multiAllItem];
+    [tools addObject:flex];
+    [tools addObject:_multiZipItem];
+    [tools addObject:flex];
+    if (canDelete) {
+        [tools addObject:_multiDeleteItem];
+        [tools addObject:flex];
+    }
+    [tools addObject:_multiDoneItem];
+    self.toolbarItems = tools;
+    // UIToolbar is translucent by default; force the same flat neutral surface
+    // as the rest of the UI so no system material sneaks back in.
+    UIToolbar *toolbar = self.navigationController.toolbar;
+    toolbar.translucent = NO;
+    toolbar.barTintColor = WQColorSurface();
+    toolbar.tintColor = WQColorText();
+    self.navigationController.toolbarHidden = NO;
+    [self updateMultiSelectionBar];
     [self.tableView reloadData];
     [self updateHeader];
 }
 
-- (void)exitExportSelection
+- (void)exitMultiSelection
 {
-    if (!_selectingExport) return;
-    _selectingExport = NO;
-    [_selectedExport removeAllObjects];
+    if (!_selectingMulti) return;
+    _selectingMulti = NO;
+    [_selectedMulti removeAllObjects];
+    self.toolbarItems = @[];
+    self.navigationController.toolbarHidden = YES;
     self.refreshControl.enabled = YES;
     self.title = _baseTitle;
     self.navigationItem.rightBarButtonItems = _backupStorage ? @[_selectItem, _menuItem] : nil;
@@ -1130,21 +1160,81 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     [self updateHeader];
 }
 
-- (void)selectAllForExport
+- (void)selectAllForMulti
 {
-    for (WQItem *item in _items) [_selectedExport addObject:item.path];
-    [self updateExportSelectionBar];
+    for (WQItem *item in _items) [_selectedMulti addObject:item.path];
+    [self updateMultiSelectionBar];
     [self.tableView reloadData];
 }
 
 - (void)exportSelectedAsZip
 {
-    NSArray<NSString *> *paths = [_selectedExport.allObjects sortedArrayUsingSelector:@selector(compare:)];
+    NSArray<NSString *> *paths = [_selectedMulti.allObjects sortedArrayUsingSelector:@selector(compare:)];
     if (paths.count == 0) return;
     NSString *name = [NSString stringWithFormat:@"%@ 导出 %lu 项", _baseTitle ?: @"所选项目",
                       (unsigned long)paths.count];
     wq_share_paths(self, paths, name, self.view);
-    [self exitExportSelection];
+    [self exitMultiSelection];
+}
+
+// Batch removal. Folders are removed with their whole contents (explicitly
+// confirmed); regular files keep a copy in Backups; symlinks are removed as
+// links, never followed. Backup storage and read-only folders cannot delete.
+- (void)deleteSelectedItems
+{
+    if (self.readOnly || _backupStorage) {
+        wq_alert(self, @"无法删除", @"只读目录与备份存储不支持批量删除。");
+        return;
+    }
+    NSArray<NSString *> *paths = [_selectedMulti.allObjects sortedArrayUsingSelector:@selector(compare:)];
+    if (paths.count == 0) return;
+    NSSet<NSString *> *chosen = [NSSet setWithArray:paths];
+    NSUInteger folders = 0, links = 0, files = 0;
+    for (WQItem *item in _items) {
+        if (![chosen containsObject:item.path]) continue;
+        if (item.isLink) links++;
+        else if (item.isDir) folders++;
+        else files++;
+    }
+    NSString *message = [NSString stringWithFormat:
+        @"共 %lu 项：%lu 个文件夹、%lu 个文件、%lu 个符号链接。\n\n"
+        @"文件夹将连同内部全部内容一起删除，不保留副本；普通文件会在「备份」中保留一份副本；"
+        @"符号链接只移除链接本身。此操作无法撤销。",
+        (unsigned long)paths.count, (unsigned long)folders, (unsigned long)files, (unsigned long)links];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"删除所选项目？"
+        message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"删除" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction *__unused a) {
+            dispatch_async(wq_io(), ^{
+                NSUInteger okCount = 0;
+                NSMutableArray<NSString *> *failures = [NSMutableArray new];
+                for (NSString *path in paths) {
+                    NSString *error = nil;
+                    BOOL ok = wq_delete_tree(path, &error);
+                    if (ok) okCount++;
+                    else if (failures.count < 4)
+                        [failures addObject:[NSString stringWithFormat:@"%@：%@", path.lastPathComponent,
+                                             error ?: @"未知错误"]];
+                }
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    WQDirViewController *v = weakSelf;
+                    if (!v) return;
+                    wq_log(@"multi delete: %lu/%lu removed (%lu folders)",
+                           (unsigned long)okCount, (unsigned long)paths.count, (unsigned long)folders);
+                    [v exitMultiSelection];
+                    [v reload];
+                    if (failures.count) {
+                        wq_alert(v, @"部分删除失败", [NSString stringWithFormat:
+                            @"成功 %lu 项，失败 %lu 项。\n\n%@",
+                            (unsigned long)okCount, (unsigned long)(paths.count - okCount),
+                            [failures componentsJoinedByString:@"\n"]]);
+                    }
+                });
+            });
+        }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)updateBackupSelectionAvailability
@@ -1495,8 +1585,8 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     c.image = appIcon ?: [UIImage systemImageNamed:item.isDir ? @"folder.fill" : (item.isLink ? @"link" : @"doc")];
     if (appIcon) c.imageProperties.maximumSize = CGSizeMake(36, 36);
     cell.contentConfiguration = c;
-    if (_selectingExport) {
-        cell.accessoryType = [_selectedExport containsObject:item.path]
+    if (_selectingMulti) {
+        cell.accessoryType = [_selectedMulti containsObject:item.path]
             ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     } else if (_selectingBackups) {
@@ -1515,21 +1605,21 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 {
     if ([self wq_deepStatusRow]) return nil;
     if (_error || indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
-    if (_selectingExport || !_selectingBackups) return indexPath;
+    if (_selectingMulti || !_selectingBackups) return indexPath;
     WQItem *item = _items[(NSUInteger)indexPath.row];
     return wq_backup_unit_deletable(item.path) ? indexPath : nil;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (_selectingExport) {
+    if (_selectingMulti) {
         [tableView deselectRowAtIndexPath:indexPath animated:YES];
         if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return;
         WQItem *tapped = _items[(NSUInteger)indexPath.row];
-        if ([_selectedExport containsObject:tapped.path]) [_selectedExport removeObject:tapped.path];
-        else [_selectedExport addObject:tapped.path];
+        if ([_selectedMulti containsObject:tapped.path]) [_selectedMulti removeObject:tapped.path];
+        else [_selectedMulti addObject:tapped.path];
         [tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
-        [self updateExportSelectionBar];
+        [self updateMultiSelectionBar];
         return;
     }
     if (_selectingBackups) {
@@ -1583,7 +1673,7 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 // long-press menu (files are backed up first; backups only as whole units).
 - (UISwipeActionsConfiguration *)deleteSwipeForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (_selectingBackups || _selectingExport || _error || [self wq_deepActive]) return nil;
+    if (_selectingBackups || _selectingMulti || _error || [self wq_deepActive]) return nil;
     if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
     WQItem *item = _items[(NSUInteger)indexPath.row];
     BOOL backupUnit = item.isDir && wq_backup_unit_deletable(item.path);
@@ -1625,7 +1715,7 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView
     contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point
 {
-    if (_selectingBackups || _selectingExport || _error || [self wq_deepActive]) return nil;
+    if (_selectingBackups || _selectingMulti || _error || [self wq_deepActive]) return nil;
     if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
     WQItem *item = _items[(NSUInteger)indexPath.row];
     NSString *itemPath = [item.path copy];
