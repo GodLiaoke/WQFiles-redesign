@@ -238,3 +238,220 @@ static NSString *wq_zip_name(NSString *dir)
     }
     return dir.lastPathComponent;
 }
+
+
+#pragma mark - Multi-selection ZIP export
+
+// A unique destination name keeps two files with the same leaf name (possible
+// when the list was filtered or built from different folders) both in the ZIP.
+static NSString *WQExportUniquePath(NSFileManager *fm, NSString *dir, NSString *name)
+{
+    NSString *dest = [dir stringByAppendingPathComponent:name];
+    if (![fm fileExistsAtPath:dest]) return dest;
+    NSString *base = name.stringByDeletingPathExtension;
+    NSString *ext = name.pathExtension;
+    for (NSUInteger i = 2; i < 1000; i++) {
+        NSString *candidate = ext.length
+            ? [NSString stringWithFormat:@"%@-%lu.%@", base, (unsigned long)i, ext]
+            : [NSString stringWithFormat:@"%@-%lu", name, (unsigned long)i];
+        NSString *path = [dir stringByAppendingPathComponent:candidate];
+        if (![fm fileExistsAtPath:path]) return path;
+    }
+    return [dir stringByAppendingPathComponent:
+        [NSUUID.UUID.UUIDString stringByAppendingPathExtension:(ext.length ? ext : @"dat")]];
+}
+
+static void WQExportHUD(WQSharePreparation *preparation, NSString *text)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!preparation.isCancelled) preparation.hud.message = text;
+    });
+}
+
+// Copies a selected directory into the staging tree. Symbolic links and
+// special files are skipped, never followed; every source folder is listed
+// through wq_list so sandbox tokens are obtained when needed.
+static BOOL WQExportCopyTree(NSString *src, NSString *dst, NSUInteger depth,
+                             WQSharePreparation *preparation,
+                             NSUInteger *files, unsigned long long *bytes,
+                             NSUInteger *skipped, NSUInteger *failed, NSUInteger *truncated,
+                             NSString **firstError)
+{
+    if (preparation.isCancelled) return NO;
+    if (depth > 12) { (*truncated)++; return YES; }
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSError *dirError = nil;
+    if (![fm createDirectoryAtPath:dst withIntermediateDirectories:YES attributes:nil error:&dirError]) {
+        (*failed)++;
+        if (firstError && !*firstError) *firstError = dirError.localizedDescription ?: @"无法创建临时目录";
+        return NO;
+    }
+    NSArray<NSString *> *names = wq_list(src, nil);
+    if (!names) {
+        (*skipped)++;   // unreadable folder is skipped, not a whole-export failure
+        return YES;
+    }
+    for (NSString *name in names) {
+        if (preparation.isCancelled) return NO;
+        if (!name.length || [name isEqualToString:@"."] || [name isEqualToString:@".."]) continue;
+        NSString *full = [src stringByAppendingPathComponent:name];
+        NSString *dest = [dst stringByAppendingPathComponent:name];
+        struct stat st = {0};
+        if (lstat(full.fileSystemRepresentation, &st) != 0 && !wq_stat(full, &st)) { (*skipped)++; continue; }
+        if (S_ISLNK(st.st_mode)) { (*skipped)++; continue; }
+        if (S_ISDIR(st.st_mode)) {
+            if (!WQExportCopyTree(full, dest, depth + 1, preparation, files, bytes,
+                                  skipped, failed, truncated, firstError)) return NO;
+            continue;
+        }
+        if (!S_ISREG(st.st_mode)) { (*skipped)++; continue; }
+        if (*files >= 2000 || *bytes >= 512ULL * 1024 * 1024) {
+            (*truncated)++;
+            return NO;
+        }
+        NSString *why = nil;
+        if (!wq_copy_to_local(full, dest, &why)) {
+            // Fall back to a plain copy after an explicit grant; some folders
+            // hand out tokens only for the child path.
+            wq_grant(full);
+            NSError *copyError = nil;
+            if (![fm copyItemAtPath:full toPath:dest error:&copyError]) {
+                (*failed)++;
+                if (firstError && !*firstError) *firstError = why ?: (copyError.localizedDescription ?: @"复制失败");
+                continue;
+            }
+        }
+        (*files)++;
+        *bytes += (unsigned long long)st.st_size;
+    }
+    return YES;
+}
+
+void wq_share_paths(UIViewController *host, NSArray<NSString *> *paths,
+                    NSString *zipName, UIView *source)
+{
+    if (!wq_share_host_is_active(host)) return;
+    if (wq_share_in_flight(host)) {
+        wq_alert(host, @"正在分享", @"Wait for the current share to finish before starting another.");
+        return;
+    }
+    if (paths.count == 0) return;
+    WQSharePreparation *preparation = [WQSharePreparation new];
+    preparation.host = host;
+    UIAlertController *hud = [UIAlertController alertControllerWithTitle:@"正在准备导出"
+        message:@"正在复制所选项目…" preferredStyle:UIAlertControllerStyleAlert];
+    [hud addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *__unused action) {
+        preparation.cancelled = YES;
+        objc_setAssociatedObject(host, &kWQSharePreparationKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [host dismissViewControllerAnimated:YES completion:nil];
+    }]];
+    preparation.hud = hud;
+    objc_setAssociatedObject(host, &kWQSharePreparationKey, preparation, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [host presentViewController:hud animated:YES completion:nil];
+
+    dispatch_async(wq_io(), ^{
+        NSString *safe = [[(zipName ?: @"导出") componentsSeparatedByCharactersInSet:
+            [NSCharacterSet characterSetWithCharactersInString:@"/:"]] componentsJoinedByString:@"-"];
+        NSString *outDir = wq_unique_export_directory();
+        preparation.exportDir = outDir;
+        NSString *staging = outDir ? [outDir stringByAppendingPathComponent:safe] : nil;
+        NSString *zip = outDir ? [outDir stringByAppendingPathComponent:
+                                  [safe stringByAppendingPathExtension:@"zip"]] : nil;
+        NSFileManager *fm = NSFileManager.defaultManager;
+        NSUInteger files = 0, skipped = 0, failed = 0, truncated = 0;
+        unsigned long long bytes = 0;
+        NSString *firstError = nil;
+        BOOL ok = NO;
+        if (staging && [fm createDirectoryAtPath:staging withIntermediateDirectories:NO
+                                     attributes:nil error:nil]) {
+            NSUInteger index = 0;
+            for (NSString *path in paths) {
+                if (preparation.isCancelled) break;
+                index++;
+                if (index == 1 || index % 5 == 0 || index == paths.count)
+                    WQExportHUD(preparation, [NSString stringWithFormat:
+                        @"正在复制 %lu / %lu", (unsigned long)index, (unsigned long)paths.count]);
+                NSString *dest = WQExportUniquePath(fm, staging, path.lastPathComponent);
+                struct stat st = {0};
+                if (lstat(path.fileSystemRepresentation, &st) != 0 && !wq_stat(path, &st)) { failed++; continue; }
+                if (S_ISLNK(st.st_mode)) { skipped++; continue; }
+                if (S_ISDIR(st.st_mode)) {
+                    if (!WQExportCopyTree(path, dest, 1, preparation, &files, &bytes,
+                                          &skipped, &failed, &truncated, &firstError)) break;
+                } else if (S_ISREG(st.st_mode)) {
+                    if (files >= 2000 || bytes >= 512ULL * 1024 * 1024) { truncated++; break; }
+                    NSString *why = nil;
+                    if (!wq_copy_to_local(path, dest, &why)) {
+                        wq_grant(path);
+                        NSError *copyError = nil;
+                        if (![fm copyItemAtPath:path toPath:dest error:&copyError]) {
+                            failed++;
+                            if (!firstError) firstError = why ?: (copyError.localizedDescription ?: @"复制失败");
+                            continue;
+                        }
+                    }
+                    files++;
+                    bytes += (unsigned long long)st.st_size;
+                } else { skipped++; }
+            }
+            if (!preparation.isCancelled && files > 0) {
+                WQExportHUD(preparation, @"正在压缩成 ZIP…");
+                __block NSError *copyError = nil;
+                NSError *coordError = nil;
+                [[NSFileCoordinator new] coordinateReadingItemAtURL:[NSURL fileURLWithPath:staging]
+                    options:NSFileCoordinatorReadingForUploading error:&coordError
+                    byAccessor:^(NSURL *zipped) {
+                        if (!preparation.isCancelled)
+                            [fm copyItemAtURL:zipped toURL:[NSURL fileURLWithPath:zip] error:&copyError];
+                    }];
+                ok = zip && [fm fileExistsAtPath:zip];
+                if (!ok && !firstError)
+                    firstError = (coordError ?: copyError).localizedDescription ?: @"无法创建 ZIP";
+            } else if (!preparation.isCancelled && !firstError && files == 0) {
+                firstError = @"没有可导出的普通文件；所选目录可能为空，或全部是符号链接。";
+            }
+        }
+        [fm removeItemAtPath:staging error:nil];
+        NSString *why = firstError ?: @"无法创建 ZIP";
+        wq_log(@"export zip: %lu selected -> %@ %@ (files=%lu bytes=%llu skipped=%lu failed=%lu truncated=%lu)",
+               (unsigned long)paths.count, zip.lastPathComponent ?: @"(none)", ok ? @"OK" : why,
+               (unsigned long)files, bytes, (unsigned long)skipped, (unsigned long)failed,
+               (unsigned long)truncated);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIViewController *strongHost = preparation.host;
+            BOOL hudPresented = strongHost && strongHost.presentedViewController == hud;
+            void (^finish)(void) = ^{
+                BOOL stale = preparation.isCancelled || !wq_share_host_is_active(strongHost);
+                wq_clear_preparation(strongHost, preparation);
+                if (!ok || stale) {
+                    wq_remove_export(outDir);
+                    if (!stale && wq_share_host_is_active(strongHost))
+                        wq_alert(strongHost, @"导出失败", why);
+                    return;
+                }
+                if (skipped || failed || truncated) {
+                    UIAlertController *note = [UIAlertController alertControllerWithTitle:@"导出说明"
+                        message:[NSString stringWithFormat:
+                            @"已打包 %lu 个文件（%@）。跳过 %lu 项，失败 %lu 项，达到上限 %lu 项。\n\n"
+                            @"符号链接与非普通文件不会写入 ZIP；目录最深 12 层、最多 2000 个文件或 512 MB。",
+                            (unsigned long)files, wq_size_text(bytes), (unsigned long)skipped,
+                            (unsigned long)failed, (unsigned long)truncated]
+                        preferredStyle:UIAlertControllerStyleAlert];
+                    [note addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel
+                        handler:^(UIAlertAction *__unused a) { wq_remove_export(outDir); }]];
+                    [note addAction:[UIAlertAction actionWithTitle:@"继续导出" style:UIAlertActionStyleDefault
+                        handler:^(UIAlertAction *__unused a) {
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                if (!wq_present_share(strongHost, zip, outDir, source)) wq_remove_export(outDir);
+                            });
+                        }]];
+                    [strongHost presentViewController:note animated:YES completion:nil];
+                    return;
+                }
+                if (!wq_present_share(strongHost, zip, outDir, source)) wq_remove_export(outDir);
+            };
+            if (hudPresented) [strongHost dismissViewControllerAnimated:YES completion:finish];
+            else finish();
+        });
+    });
+}

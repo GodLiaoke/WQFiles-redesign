@@ -684,6 +684,11 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 - (BOOL)wq_deepActive;
 - (BOOL)wq_deepStatusRow;
 - (void)scheduleDeepSearch:(NSString *)query;
+- (void)enterExportSelection;
+- (void)exitExportSelection;
+- (void)selectAllForExport;
+- (void)exportSelectedAsZip;
+- (void)updateExportSelectionBar;
 @end
 
 @implementation WQDirViewController {
@@ -706,6 +711,9 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     BOOL _backupStorage;
     BOOL _selectingBackups;
     NSMutableSet<NSString *> *_selectedBackups;
+    BOOL _selectingExport;
+    NSMutableSet<NSString *> *_selectedExport;
+    UIBarButtonItem *_exportZipItem, *_exportDoneItem, *_exportAllItem;
     UIBarButtonItem *_selectItem;
     UIBarButtonItem *_menuItem;
     UIBarButtonItem *_doneItem;
@@ -728,6 +736,7 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
         self.title = title ?: (path.lastPathComponent.length ? path.lastPathComponent : @"/");
         _baseTitle = self.title;
         _selectedBackups = [NSMutableSet new];
+        _selectedExport = [NSMutableSet new];
         // Container parents: show bundle/group identifiers instead of UUIDs.
         NSString *parent = path.lastPathComponent;
         _labels = [@[@"Application", @"AppGroup", @"PluginKitPlugin", @"InternalDaemon", @"System"] containsObject:parent];
@@ -757,6 +766,13 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     }
     [menuItems addObject:[UIAction actionWithTitle:@"拷贝路径" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil
                           handler:^(UIAction *__unused a) { UIPasteboard.generalPasteboard.string = path; }]];
+    // Container parents hold hundreds of app containers; multi-select ZIP is
+    // offered only inside a real folder (including backup folders).
+    if (!_labels) {
+        [menuItems addObject:[UIAction actionWithTitle:@"多选并压缩导出"
+            image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil
+            handler:^(UIAction *__unused a) { [weakSelf enterExportSelection]; }]];
+    }
     // Built when the menu opens, so the checkmarks show the current order.
     [menuItems addObject:[UIDeferredMenuElement elementWithUncachedProvider:^(void (^completion)(NSArray<UIMenuElement *> *)) {
         WQSortKey current = wq_sort_key();
@@ -828,6 +844,7 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 {
     [super viewWillDisappear:animated];
     if (_selectingBackups) [self exitBackupSelection];
+    if (_selectingExport) [self exitExportSelection];
     if (_scanInFlight) {
         _scanNeedsRefresh = YES;
         [_scanCancellation cancel];
@@ -1048,6 +1065,86 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     for (WQItem *item in _items)
         if (wq_backup_unit_deletable(item.path)) [paths addObject:item.path];
     return paths;
+}
+
+#pragma mark - Multi-selection ZIP export
+
+- (void)updateExportSelectionBar
+{
+    NSUInteger count = _selectedExport.count;
+    _exportZipItem.title = [NSString stringWithFormat:@"导出 ZIP (%lu)", (unsigned long)count];
+    _exportZipItem.enabled = count > 0;
+    _exportAllItem.enabled = count < _items.count;
+}
+
+- (void)enterExportSelection
+{
+    if (_error || _items.count == 0) {
+        wq_alert(self, @"无法多选", @"当前文件夹没有可导出的项目。");
+        return;
+    }
+    // Leave any search/deep result set first: exporting works on the plain
+    // folder listing, where every leaf name is unique.
+    [_deepCancellation cancel];
+    _deepGeneration++;
+    _deepItems = nil;
+    _deepStatus = nil;
+    _query = nil;
+    _searchScope = 0;
+    UISearchController *search = self.navigationItem.searchController;
+    search.active = NO;
+    search.searchBar.text = @"";
+    search.searchBar.selectedScopeButtonIndex = 0;
+    [self applyFilter];
+    if (_selectingBackups) [self exitBackupSelection];
+    _selectingExport = YES;
+    [_selectedExport removeAllObjects];
+    if (!_exportZipItem) {
+        _exportZipItem = [[UIBarButtonItem alloc] initWithTitle:@"导出 ZIP" style:UIBarButtonItemStyleProminent
+            target:self action:@selector(exportSelectedAsZip)];
+        _exportDoneItem = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:UIBarButtonItemStylePlain
+            target:self action:@selector(exitExportSelection)];
+        _exportAllItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle"]
+            style:UIBarButtonItemStylePlain target:self action:@selector(selectAllForExport)];
+        _exportAllItem.accessibilityLabel = @"全选";
+    }
+    self.tableView.allowsMultipleSelection = NO;
+    self.refreshControl.enabled = NO;
+    self.title = @"选择要导出的项目";
+    self.navigationItem.rightBarButtonItems = @[_exportAllItem, _exportZipItem, _exportDoneItem];
+    [self updateExportSelectionBar];
+    [self.tableView reloadData];
+    [self updateHeader];
+}
+
+- (void)exitExportSelection
+{
+    if (!_selectingExport) return;
+    _selectingExport = NO;
+    [_selectedExport removeAllObjects];
+    self.refreshControl.enabled = YES;
+    self.title = _baseTitle;
+    self.navigationItem.rightBarButtonItems = _backupStorage ? @[_selectItem, _menuItem] : nil;
+    if (!_backupStorage) self.navigationItem.rightBarButtonItem = _menuItem;
+    [self.tableView reloadData];
+    [self updateHeader];
+}
+
+- (void)selectAllForExport
+{
+    for (WQItem *item in _items) [_selectedExport addObject:item.path];
+    [self updateExportSelectionBar];
+    [self.tableView reloadData];
+}
+
+- (void)exportSelectedAsZip
+{
+    NSArray<NSString *> *paths = [_selectedExport.allObjects sortedArrayUsingSelector:@selector(compare:)];
+    if (paths.count == 0) return;
+    NSString *name = [NSString stringWithFormat:@"%@ 导出 %lu 项", _baseTitle ?: @"所选项目",
+                      (unsigned long)paths.count];
+    wq_share_paths(self, paths, name, self.view);
+    [self exitExportSelection];
 }
 
 - (void)updateBackupSelectionAvailability
@@ -1398,7 +1495,11 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
     c.image = appIcon ?: [UIImage systemImageNamed:item.isDir ? @"folder.fill" : (item.isLink ? @"link" : @"doc")];
     if (appIcon) c.imageProperties.maximumSize = CGSizeMake(36, 36);
     cell.contentConfiguration = c;
-    if (_selectingBackups) {
+    if (_selectingExport) {
+        cell.accessoryType = [_selectedExport containsObject:item.path]
+            ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    } else if (_selectingBackups) {
         BOOL selectable = wq_backup_unit_deletable(item.path);
         cell.accessoryType = selectable && [_selectedBackups containsObject:item.path]
             ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
@@ -1414,13 +1515,23 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 {
     if ([self wq_deepStatusRow]) return nil;
     if (_error || indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
-    if (!_selectingBackups) return indexPath;
+    if (_selectingExport || !_selectingBackups) return indexPath;
     WQItem *item = _items[(NSUInteger)indexPath.row];
     return wq_backup_unit_deletable(item.path) ? indexPath : nil;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
+    if (_selectingExport) {
+        [tableView deselectRowAtIndexPath:indexPath animated:YES];
+        if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return;
+        WQItem *tapped = _items[(NSUInteger)indexPath.row];
+        if ([_selectedExport containsObject:tapped.path]) [_selectedExport removeObject:tapped.path];
+        else [_selectedExport addObject:tapped.path];
+        [tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+        [self updateExportSelectionBar];
+        return;
+    }
     if (_selectingBackups) {
         if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return;
         WQItem *selected = _items[(NSUInteger)indexPath.row];
@@ -1472,7 +1583,7 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 // long-press menu (files are backed up first; backups only as whole units).
 - (UISwipeActionsConfiguration *)deleteSwipeForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (_selectingBackups || _error || [self wq_deepActive]) return nil;
+    if (_selectingBackups || _selectingExport || _error || [self wq_deepActive]) return nil;
     if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
     WQItem *item = _items[(NSUInteger)indexPath.row];
     BOOL backupUnit = item.isDir && wq_backup_unit_deletable(item.path);
@@ -1514,7 +1625,7 @@ static NSArray<WQItem *> *WQRecursiveSearch(NSString *root, NSArray<NSString *> 
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView
     contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point
 {
-    if (_selectingBackups || _error || [self wq_deepActive]) return nil;
+    if (_selectingBackups || _selectingExport || _error || [self wq_deepActive]) return nil;
     if (indexPath.section != 0 || (NSUInteger)indexPath.row >= _items.count) return nil;
     WQItem *item = _items[(NSUInteger)indexPath.row];
     NSString *itemPath = [item.path copy];
